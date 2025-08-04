@@ -485,14 +485,18 @@ class VARModel:
                         dfc[f"{a}_lag_{lg}"] = dfc[a].shift(lg)
 
             # Lag transforms
+
             if self.lag_transform is not None:
-                for n, transforms in self.lag_transform.items():
-                    for f in transforms:
-                        df_array = np.array(dfc[n].shift(f[0]))
-                        if f[1].__name__ == "rolling_quantile":
-                            dfc[f"q_{f[3]}_{n}_{f[0]}_w{f[2]}"] = f[1](df_array, f[2], f[3])
+                for idx, (target, funcs) in enumerate(self.lag_transform.items()):
+                    for func in funcs:
+                        if isinstance(func, (expanding_std, expanding_mean)):
+                            dfc[f"trg{idx}_{func.__class__.__name__}_shift_{func.shift}"] = func(dfc[target])
+                        elif isinstance(func, expanding_quantile):
+                            dfc[f"trg{idx}_{func.__class__.__name__}_shift_{func.shift}_q{func.quantile}"] = func(dfc[target])
+                        elif isinstance(func, rolling_quantile):
+                            dfc[f"trg{idx}_{func.__class__.__name__}_{func.window_size}_shift_{func.shift}_q{func.quantile}"] = func(dfc[target])
                         else:
-                            dfc[f"{f[1].__name__}_{n}_{f[0]}_{f[2]}"] = f[1](df_array, f[2])
+                            dfc[f"trg{idx}_{func.__class__.__name__}_{func.window_size}_shift_{func.shift}"] = func(dfc[target])
 
         dfc = dfc.dropna()
         return dfc
@@ -590,14 +594,10 @@ class VARModel:
             # Lag transforms
             transform_lag = []
             if self.lag_transform is not None:
-                for n, transforms in self.lag_transform.items():
-                    for f in transforms:
-                        df_array = np.array(pd.Series(lags).shift(f[0]-1))
-                        if f[1].__name__ == "rolling_quantile":
-                            t1 = f[1](df_array, f[2], f[3])[-1]
-                        else:
-                            t1 = f[1](df_array, f[2])[-1]
-                        transform_lag.append(t1)
+                for target, funcs in self.lag_transform.items():
+                    series_array = np.array(y_lists[target])
+                    for func in funcs:
+                        transform_lag.append(func(series_array, is_forecast=True).to_numpy()[-1])
 
             # Trend feature
             trend_var = []

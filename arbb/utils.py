@@ -10,6 +10,7 @@ from numba import jit
 ##Stationarity Check
 from statsmodels.tsa.stattools import adfuller, kpss
 from hyperopt import fmin, tpe, hp, Trials, STATUS_OK, space_eval
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -219,6 +220,27 @@ class expanding_quantile:
             return pd.Series(data).shift(self.shift-1).expanding().quantile(self.quantile)
         else:
             return pd.Series(data).shift(self.shift).expanding().quantile(self.quantile)
+        
+class expanding_ets:
+    """
+    A class to compute expanding ETS.
+    Args:
+        shift (int): The number of periods to shift time series data.
+        ets_params (dict): Parameters for the ExponentialSmoothing model.
+        fit_params (dict): Parameters for the fit method of the ExponentialSmoothing model.
+    """
+    def __init__(self, ets_params, fit_params, shift=1):
+        self.shift = shift
+        self.ets_params = ets_params
+        self.fit_params = fit_params
+    def __call__(self, data, is_forecast=False):
+        if is_forecast:
+            self.shift -= 1
+        model_ = ExponentialSmoothing(pd.Series(data).shift(self.shift).dropna(), **self.ets_params).fit(**self.fit_params)
+        fitted = model_.fittedvalues
+        fitted_aligned = pd.Series(np.nan, index=data.index) # Align the index with the original data to avoid misalignment
+        fitted_aligned.iloc[self.shift:] = fitted.values
+        return fitted_aligned
 
 #------------------------------------------------------------------------------
 # Lag Selection Algorithms
