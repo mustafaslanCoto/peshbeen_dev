@@ -73,27 +73,34 @@ def plot_PACF_ACF(series, lag_num, figsize = (15, 8)):
 # Transformation Utility Functions
 #------------------------------------------------------------------------------
 
-def fourier_terms(start, stop, period, num_terms, df_index):
-    '''
-    Returns fourier terms for the given seasonal period and dataframe.
+def fourier_terms(
+    start: int,
+    stop: int,
+    period: int,
+    num_terms: int,
+    reference_df: pd.DataFrame
+) -> pd.DataFrame:
+    """
+    Generate Fourier terms (sine and cosine) for a given period and number of terms.
 
-            Parameters:
-                    start (int): An integer that should be 0 for the training dataset,
-                    whereas for the test dataset, it should correspond to the length of the training data.
-                    stop (int): An integer representing the length of the training dataset is required
-                    for the training dataset, while for the testing dataset, it should be
-                    the sum of the lengths of both the training and test datasets.
-                    period (int): the seosanal period.
-                    num_terms (int): It specifies how many pairs of sin and cos terms to include.
-                    df_index: a dataframe (training or test dataset).
-                    It specify whether to use the indexes of the training or test dataset for the returned dataframe
-    '''
+    Args:
+        start (int): Start index (usually 0 for train, len(train) for test).
+        stop (int): Stop index (len(train) for train, len(train)+len(test) for test).
+        period (int): Seasonal period.
+        num_terms (int): Number of Fourier pairs (sine/cosine) to generate.
+        reference_df (pd.DataFrame): DataFrame whose index will be used for alignment. For example, this could be the training or test dataset.
+
+    Returns:
+        pd.DataFrame: DataFrame of Fourier terms, indexed as reference_df.
+    """
     t = np.arange(start, stop)
-    df = pd.DataFrame(index=df_index.index)
-    for i in range(1, num_terms + 1):
-        df["sin_"+str(i-1)+"_"+str(period)] = np.sin(2 * np.pi * i * t / period)
-        df["cos_"+str(i-1)+"_"+str(period)] = np.cos(2 * np.pi * i * t / period)
-    return df
+    if len(t) != len(reference_df):
+        raise ValueError("Length of generated time steps does not match reference DataFrame length.")
+    data = {}
+    for k in range(1, num_terms + 1):
+        data[f'sin_{k}_{period}'] = np.sin(2 * np.pi * k * t / period)
+        data[f'cos_{k}_{period}'] = np.cos(2 * np.pi * k * t / period)
+    return pd.DataFrame(data, index=reference_df.index)
 
 # @jit(nopython=True)
 # Your transformation classes
@@ -589,7 +596,69 @@ def Kfold_target(train, test, cat_var, target_col, encoded_colname, split_num):
 # Evaluation Metrics
 #------------------------------------------------------------------------------
 
-def rmse(y_true, y_pred):
+def MAPE(y_true, y_pred):
+    """
+    Calculate Mean Absolute Percentage Error (MAPE).
+
+    Parameters:
+    - y_true: Array of true values.
+    - y_pred: Array of predicted values.
+
+    Returns:
+    - mape: Mean Absolute Percentage Error.
+    """
+    # Ensure both arrays have the same length
+    if len(y_true) != len(y_pred):
+        raise ValueError("Input arrays must have the same length.")
+    # Convert to numpy arrays for element-wise operations
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+
+    # Calculate absolute percentage error
+    return round(np.mean(np.abs((y_true - y_pred) / y_true)), 2)
+
+def MAE(y_true, y_pred):
+    """
+    Calculate Mean Absolute Error (MAE).
+
+    Parameters:
+    - y_true: Array of true values.
+    - y_pred: Array of predicted values.
+
+    Returns:
+    - mae: Mean Absolute Error.
+    """
+    # Ensure both arrays have the same length
+    if len(y_true) != len(y_pred):
+        raise ValueError("Input arrays must have the same length.")
+    # Convert to numpy arrays for element-wise operations
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+
+    return np.mean(np.abs(y_true - y_pred))
+
+def MSE(y_true, y_pred):
+    """
+    Calculate Mean Squared Error (MSE).
+
+    Parameters:
+    - y_true: Array of true values.
+    - y_pred: Array of predicted values.
+
+    Returns:
+    - mse: Mean Squared Error.
+    """
+    # Ensure both arrays have the same length
+    if len(y_true) != len(y_pred):
+        raise ValueError("Input arrays must have the same length.")
+    
+    # Convert to numpy arrays for element-wise operations
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+
+    return np.mean((y_true - y_pred) ** 2)
+
+def RMSE(y_true, y_pred):
     """
     Calculate Root Mean Square Error (RMSE).
 
@@ -603,33 +672,55 @@ def rmse(y_true, y_pred):
     # Ensure both arrays have the same length
     if len(y_true) != len(y_pred):
         raise ValueError("Input arrays must have the same length.")
+    # Convert to numpy arrays for element-wise operations
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
 
-    # Calculate squared differences
-    squared_diff = (y_true - y_pred) ** 2
+    return np.sqrt(np.mean((y_true - y_pred) ** 2))
 
-    # Calculate mean squared error
-    mean_squared_error = np.mean(squared_diff)
-
-    # Calculate RMSE
-    rmse = np.sqrt(mean_squared_error)
-
-    return rmse
-
-def smape(y_true, y_pred):
+def SMAPE(y_true, y_pred):
+    """
+    Calculate Symmetric Mean Absolute Percentage Error (SMAPE).
+    
+    Parameters:
+    ------------
+    y_true (array-like): Actual values.
+    y_pred (array-like): Predicted values.
+    
+    Returns:
+    ------------
+    float: SMAPE value.
+    """
+    # Ensure both arrays have the same length
+    if len(y_true) != len(y_pred):
+        raise ValueError("Input arrays must have the same length.")
+    # Convert to numpy arrays for element-wise operations
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
     return 1/len(y_true) * np.sum(2 * np.abs(y_pred-y_true) / (np.abs(y_true) + np.abs(y_pred))*100)
 
-def MeanAbsoluteScaledError(y_true, y_pred, y_train):
+def MASE(y_true, y_pred, y_train):
     """
     Calculate Mean Absolute Scaled Error (MASE)
     
     Parameters:
+    ------------
     y_true (array-like): Actual values
     y_pred (array-like): Predicted values
     y_train (array-like): Training data used to scale the error
     
     Returns:
+    ------------
     float: MASE value
     """
+
+    # Ensure both arrays have the same length
+    if len(y_true) != len(y_pred):
+        raise ValueError("Input arrays must have the same length.")
+    # Convert to numpy arrays for element-wise operations
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    y_train = np.array(y_train)
     # Calculate the mean absolute error
     mae = np.mean(np.abs(y_true - y_pred))
     
@@ -637,41 +728,73 @@ def MeanAbsoluteScaledError(y_true, y_pred, y_train):
     scaled_error = np.mean(np.abs(np.diff(y_train)))
     
     # Calculate MASE
-    mase = mae / scaled_error
-    
-    return mase
 
-def MedianAbsoluteScaledError(y_true, y_pred, y_train):
-    """
-    Calculate Median Absolute Scaled Error (MASE)
+    return mae / scaled_error
+
+# def MedianASE(y_true, y_pred, y_train):
+#     """
+#     Calculate Median Absolute Scaled Error (MASE)
     
+#     Parameters:
+#     y_true (array-like): Actual values
+#     y_pred (array-like): Predicted values
+#     y_train (array-like): Training data used to scale the error
+    
+#     Returns:
+#     float: MASE value
+#     """
+
+#     # Ensure both arrays have the same length
+#     if len(y_true) != len(y_pred):
+#         raise ValueError("Input arrays must have the same length.")
+#     # Convert to numpy arrays for element-wise operations
+#     y_true = np.array(y_true)
+#     y_pred = np.array(y_pred)
+#     y_train = np.array(y_train)
+#     # Calculate the mean absolute error
+#     mae = np.median(np.abs(y_true - y_pred))
+    
+#     # Calculate the scaled error
+#     scaled_error = np.median(np.abs(np.diff(y_train)))
+    
+#     # Calculate MASE
+    
+#     return mae / scaled_error
+
+
+def CFE(y_true, y_pred):
+    """
+    Calculate Cumulative Forecast Error (CFE).
     Parameters:
-    y_true (array-like): Actual values
-    y_pred (array-like): Predicted values
-    y_train (array-like): Training data used to scale the error
-    
+    y_true (array-like): Actual values.
+    y_pred (array-like): Predicted values.
+
     Returns:
-    float: MASE value
+    float: CFE value.
     """
-    # Calculate the mean absolute error
-    mae = np.median(np.abs(y_true - y_pred))
-    
-    # Calculate the scaled error
-    scaled_error = np.median(np.abs(np.diff(y_train)))
-    
-    # Calculate MASE
-    mase = mae / scaled_error
-    
-    return mase
-
-
-def cfe(y_true, y_pred):
     return np.cumsum([a - f for a, f in zip(y_true, y_pred)])[-1]
-def cfe_abs(y_true, y_pred):
+
+def CFE_ABS(y_true, y_pred):
+    """
+    Calculate Absolute Cumulative Forecast Error (CFE_ABS).
+    Parameters:
+    y_true (array-like): Actual values.
+    y_pred (array-like): Predicted values.
+
+    Returns:
+    float: Absolute CFE value.
+    """
+    # Ensure both arrays have the same length
+    if len(y_true) != len(y_pred):
+        raise ValueError("Input arrays must have the same length.")
+    # Convert to numpy arrays for element-wise operations
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    # Calculate cumulative forecast error
     cfe_t = np.cumsum([a - f for a, f in zip(y_true, y_pred)])
     return np.abs(cfe_t[-1])
 
-def wmape(y_true, y_pred):
+def WMAPE(y_true, y_pred):
     """
     Calculate Weighted Mean Absolute Percentage Error (WMAPE).
     
@@ -682,12 +805,14 @@ def wmape(y_true, y_pred):
     Returns:
     float: WMAPE value.
     """
+    # Ensure both arrays have the same length
+    if len(y_true) != len(y_pred):
+        raise ValueError("Input arrays must have the same length.")
+    # Convert to numpy arrays for element-wise operations
     y_true = np.array(y_true)
     y_pred = np.array(y_pred)
     
-    wmape_value = np.sum(np.abs(y_true - y_pred)) / np.sum(y_true)
-    
-    return wmape_value
+    return np.sum(np.abs(y_true - y_pred)) / np.sum(y_true)
 
 #------------------------------------------------------------------------------
 # Box-Cox Transformation Utility Functions
@@ -1113,7 +1238,7 @@ def tune_sarima(y, d, D, season,p_range, q_range, P_range, Q_range, X=None):
 # ML tuning utility function
 #------------------------------------------------------------------------------
 
-def cross_validate(self, model, df, cv_split, test_size, metrics):
+def cross_validate(self, model, df, cv_split, test_size, metrics, step_size=None):
     """
     Run cross-validation using time series splits.
 
@@ -1127,7 +1252,7 @@ def cross_validate(self, model, df, cv_split, test_size, metrics):
     Returns:
         pd.DataFrame: Performance metrics for CV.
     """
-    tscv = TimeSeriesSplit(n_splits=cv_split, test_size=test_size)
+    tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
     self.metrics_dict = {m.__name__: [] for m in metrics}
     for train_index, test_index in tscv.split(df):
         train, test = df.iloc[train_index], df.iloc[test_index]
@@ -1137,10 +1262,8 @@ def cross_validate(self, model, df, cv_split, test_size, metrics):
         bb_forecast = model.forecast(test_size, x_test=x_test)
         # Evaluate each metric
         for m in metrics:
-            if m.__name__ == 'mean_squared_error':
-                eval_val = m(y_test, bb_forecast, squared=False)
-            elif m.__name__ in ['MeanAbsoluteScaledError', 'MedianAbsoluteScaledError']:
-                eval_val = m(y_test, bb_forecast, np.array(train[self.target_col]))
+            if m.__name__ == "MASE":
+                eval_val = m(y_test, bb_forecast, train[self.target_col])
             else:
                 eval_val = m(y_test, bb_forecast)
             self.metrics_dict[m.__name__].append(eval_val)
@@ -1148,7 +1271,7 @@ def cross_validate(self, model, df, cv_split, test_size, metrics):
     return pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
 
 
-def bidirectional_cross_validate(self, model, df, cv_split, test_size, metrics):
+def bidirectional_cross_validate(self, model, df, cv_split, test_size, metrics, step_size=None):
     """
     Cross-validate the bidirectional CatBoost model with time series split.
     Args:
@@ -1159,7 +1282,7 @@ def bidirectional_cross_validate(self, model, df, cv_split, test_size, metrics):
     Returns:
         pd.DataFrame: CV performance metrics for each target variable.
     """
-    tscv = TimeSeriesSplit(n_splits=cv_split, test_size=test_size)
+    tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
     self.metrics_dict = {m.__name__: [] for m in metrics}
     self.cv_fi = pd.DataFrame()
     self.cv_forecasts_df = pd.DataFrame()
@@ -1177,16 +1300,15 @@ def bidirectional_cross_validate(self, model, df, cv_split, test_size, metrics):
         forecat_df["forecasts2"] = forecast_vals2
         self.cv_forecasts_df = pd.concat([self.cv_forecasts_df, forecat_df], axis=0)
         for m in metrics:
-            if m.__name__ == 'mean_squared_error':
-                val1 = m(y_test1, forecast_vals1, squared=False)
-                val2 = m(y_test2, forecast_vals2, squared=False)
-            elif m.__name__ in ['MeanAbsoluteScaledError', 'MedianAbsoluteScaledError']:
-                val1 = m(y_test1, forecast_vals1, np.array(train[self.target_cols[0]]))
-                val2 = m(y_test2, forecast_vals2, np.array(train[self.target_cols[1]]))
+            if m.__name__ == "MASE":
+                val1 = m(y_test1, forecast_vals1, train[self.target_cols[0]])
+                val2 = m(y_test2, forecast_vals2, train[self.target_cols[1]])
             else:
                 val1 = m(y_test1, forecast_vals1)
                 val2 = m(y_test2, forecast_vals2)
+
             self.metrics_dict[m.__name__].append([val1, val2])
+
         cv_tr_df1 = pd.DataFrame({"feat_name": self.model1_fit.feature_names_in_,
                                 "importance": self.model1_fit.feature_importances_}).sort_values(by="importance", ascending=False)
         cv_tr_df1["target"] = self.target_cols[0]
@@ -1309,24 +1431,16 @@ def cv_tune(
             
             y_pred = model.forecast(n_ahead=len(y_test), x_test=x_test)
 
-            # Evaluate using the specified metric
-            # if eval_metric.__name__ == "mean_squared_error":
-            #     score = eval_metric(
-            #         y_test[-opt_horizon:] if opt_horizon else y_test,
-            #         y_pred[-opt_horizon:] if opt_horizon else y_pred,
-            #         squared=False,
-            #     )
-            # elif eval_metric.__name__ in ("MeanAbsoluteScaledError", "MedianAbsoluteScaledError"):
-            #     score = eval_metric(
-            #         y_test[-opt_horizon:] if opt_horizon else y_test,
-            #         y_pred[-opt_horizon:] if opt_horizon else y_pred,
-            #         np.array(train[model.target_col])
-            #     )
-            # else:
-            score = eval_metric(
-                    y_test[-opt_horizon:] if opt_horizon else y_test,
-                    y_pred[-opt_horizon:] if opt_horizon else y_pred,
-                )
+            #Evaluate using the specified metric
+            if eval_metric.__name__ == "MASE":
+                score = eval_metric(y_test[-opt_horizon:] if opt_horizon else y_test,
+                                    y_pred[-opt_horizon:] if opt_horizon else y_pred,
+                                    train[model.target_col])
+            else:
+                score = eval_metric(
+                        y_test[-opt_horizon:] if opt_horizon else y_test,
+                        y_pred[-opt_horizon:] if opt_horizon else y_pred,
+                    )
             metrics.append(score)
 
         mean_score = np.mean(metrics)
@@ -1576,24 +1690,16 @@ def cv_tune_bidirectional(
 
             y_pred = model.forecast(n_ahead=len(y_test), x_test=x_test)[forecast_col]
 
-            # Evaluate using the specified metric
-            # if eval_metric.__name__ == "mean_squared_error":
-            #     score = eval_metric(
-            #         y_test[-opt_horizon:] if opt_horizon else y_test,
-            #         y_pred[-opt_horizon:] if opt_horizon else y_pred,
-            #         squared=False,
-            #     )
-            # elif eval_metric.__name__ in ("MeanAbsoluteScaledError", "MedianAbsoluteScaledError"):
-            #     score = eval_metric(
-            #         y_test[-opt_horizon:] if opt_horizon else y_test,
-            #         y_pred[-opt_horizon:] if opt_horizon else y_pred,
-            #         np.array(train[model.target_col])
-            #     )
-            # else:
-            score = eval_metric(
-                    y_test[-opt_horizon:] if opt_horizon else y_test,
-                    y_pred[-opt_horizon:] if opt_horizon else y_pred,
-                )
+            #Evaluate using the specified metric
+            if eval_metric.__name__ == "MASE":
+                score = eval_metric(y_test[-opt_horizon:] if opt_horizon else y_test,
+                                    y_pred[-opt_horizon:] if opt_horizon else y_pred,
+                                    train[model.target_col])
+            else:
+                score = eval_metric(
+                        y_test[-opt_horizon:] if opt_horizon else y_test,
+                        y_pred[-opt_horizon:] if opt_horizon else y_pred,
+                    )
             metrics.append(score)
 
         mean_score = np.mean(metrics)

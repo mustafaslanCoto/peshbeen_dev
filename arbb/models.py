@@ -137,13 +137,13 @@ class ml_forecaster:
                 dfc[self.target_col] = trans_data
             # Detrend the series if specified
             if self.trend:
-                self.len = len(dfc)
+                self.len = len(df)
+                self.target_orig = df[self.target_col] # Store original values for later use during forecasting
                 if self.trend_type in ["linear", "feature_lr"]:
                     self.lr_model = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), dfc[self.target_col])
                     if self.trend_type == "linear":
                         dfc[self.target_col] = dfc[self.target_col] - self.lr_model.predict(np.arange(self.len).reshape(-1, 1))
                 if self.trend_type in ["ets", "feature_ets"]:
-                    self.target_orig = df[self.target_col]  # Store original values for later use during forecasting
                     self.ets_model = ExponentialSmoothing(df[self.target_col], **self.ets_model).fit(**self.ets_fit)
                     if self.trend_type == "ets":
                         dfc[self.target_col] = dfc[self.target_col] - self.ets_model.fittedvalues.values
@@ -235,11 +235,9 @@ class ml_forecaster:
         
         # Compute trend forecasts if needed
         if self.trend:
+            orig_lags = self.target_orig.tolist()
             if self.trend_type in ["linear", "feature_lr"]:
                 trend_pred = self.lr_model.predict(np.array(range(self.len, self.len+n_ahead)).reshape(-1, 1))
-            elif self.trend_type in ["ets", "feature_ets"]:
-                orig_lags = self.target_orig.tolist()
-                # trend_pred = self.ets_model.forecast(n_ahead).values
 
         for i in range(n_ahead):
             # If external regressors are provided, extract the i-th row
@@ -264,13 +262,19 @@ class ml_forecaster:
                 
             # If using trend as a feature, add the forecasted trend component
             trend_var = []
-            if (self.trend) and (self.trend_type == "feature_lr"):
-                trend_var.append(trend_pred[i])
-            elif (self.trend) and (self.trend_type in ["feature_ets", "ets"]):
-                ets_fit = ExponentialSmoothing(np.array(orig_lags), **self.ets_model).fit(**self.ets_fit)
-                ets_forecast = ets_fit.forecast(1)[0]
-                if self.trend_type == "feature_ets":
-                    trend_var.append(ets_forecast)
+            if self.trend:
+                if self.trend_type in ["feature_lr", "linear"]:
+                    trend_fit = LinearRegression().fit(np.arange(self.len + i).reshape(-1, 1), np.array(orig_lags))
+                    trend_forecast = trend_fit.predict(np.array([[self.len + i]]))[0] # Predicting the next value trend
+                else:  # ets or feature_ets
+                    trend_fit = ExponentialSmoothing(np.array(orig_lags), **self.ets_model).fit(**self.ets_fit)
+                    trend_forecast = trend_fit.forecast(1)[0]
+
+                if self.trend_type in ["feature_ets", "feature_lr"]:
+                    trend_var.append(trend_forecast) # Add the trend forecast as a feature
+
+        # trend_fit2 = LinearRegression().fit(np.arange(self.len + i).reshape(-1, 1), np.array(orig_target2))
+        # trend_forecast2 = trend_fit2.predict(np.array([[self.len + i]]))[0] # Predicting the next value trend
 
             # Concatenate all features for the forecast step
             inp = x_var + inp_lag + transform_lag + trend_var
@@ -284,19 +288,15 @@ class ml_forecaster:
 
             # If trend as ets is applied, add the trend component (ets_forecast) to the prediction
             if self.trend:
-                if self.trend_type == "ets":
-                    # ets_fit = ExponentialSmoothing(np.array(orig_lags), **self.ets_model).fit(**self.ets_fit)
-                    # ets_forecast = ets_fit.forecast(1)[0]
-                    orig_pred = pred + ets_forecast
+                if self.trend_type in ["ets", "linear"]:
+                    orig_pred = pred + trend_forecast
                     predictions.append(orig_pred)
                     orig_lags.append(orig_pred)
-                elif self.trend_type == "feature_ets":
+                else: # feature_ets or feature_lr: Already added trend forecast as a feature
                     orig_lags.append(pred)
                     predictions.append(pred)
-                else: # linear or feature_lr
-                    predictions.append(pred)
             else:
-                predictions.append(pred)
+                predictions.append(pred) # No trend adjustment, just append the prediction
 
         forecasts = np.array(predictions)
         # Revert seasonal differencing if applied
@@ -305,9 +305,6 @@ class ml_forecaster:
         # Revert ordinary differencing if applied
         if self.difference is not None:
             forecasts = undiff_ts(self.orig, forecasts, self.difference)
-        # Add static linear trend back if required
-        if (self.trend) and (self.trend_type == "linear"):
-            forecasts = trend_pred + forecasts
         # Ensure forecasts are nonnegative
         forecasts = np.array([max(0, x) for x in forecasts])
         # Finally, invert Box-Cox transform if it was applied
@@ -411,8 +408,10 @@ class VARModel:
             self.biasadj = {k: False for k in self.box_cox}
         
         # Handle trend default types
-        if self.trend is not None and not isinstance(self.trend, dict):
-            raise TypeError("trend must be a dictionary of target values")
+        if self.trend is not None:
+            if not isinstance(self.trend, dict):
+                raise TypeError("trend must be a dictionary of target values")
+        # 
         if self.trend is not None and self.trend_types is None:
             self.trend_types = {k: "linear" for k in self.trend}
 
@@ -448,22 +447,17 @@ class VARModel:
                         dfc[k] = trans_data
 
             # Detrending
-            if self.trend is not None:
-                self.tr_models = {i: None for i in self.trend_types}
-                self.len = len(dfc)
-                for k, tr in self.trend_types.items():
-                    if tr in ["linear", "feature_lr"]:
-                        lr = LinearRegression()
-                        lr.fit(np.arange(self.len).reshape(-1, 1), dfc[k])
-                        self.tr_models[k] = lr
-                        if tr == "linear":
-                            dfc[k] = dfc[k] - lr.predict(np.arange(self.len).reshape(-1, 1))
-                    elif tr in ["ses", "feature_ses"]:
-                        ets = ExponentialSmoothing(dfc[k], **self.ets_params[k][0])
-                        fit = ets.fit(**self.ets_params[k][1])
-                        self.tr_models[k] = fit
-                        if tr == "ses":
-                            dfc[k] = dfc[k] - fit.fittedvalues.values
+            if any(self.trend.values()):
+                self.len = df.shape[0]
+                self.orig_targets = {i: df[i] for i in self.trend.keys()}  # Store original values for later use during forecasting
+                for k, v in self.trend.items():
+                    if v: # If trend removal is required for this target
+                        if self.trend_types[k] == "linear":
+                            model_fit = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), self.orig_targets[k])
+                            dfc[k] = dfc[k] - model_fit.predict(np.arange(self.len).reshape(-1, 1))
+                        else: # ets
+                            model_fit = ExponentialSmoothing(self.orig_targets[k], **self.ets_params[k][0]).fit(**self.ets_params[k][1])
+                            dfc[k] = dfc[k] - model_fit.fittedvalues.values
 
             # Differencing
             if self.diffs is not None:
@@ -497,7 +491,7 @@ class VARModel:
                             dfc[f"trg{idx}_{func.__class__.__name__}_{func.window_size}_shift_{func.shift}_q{func.quantile}"] = func(dfc[target])
                         else:
                             dfc[f"trg{idx}_{func.__class__.__name__}_{func.window_size}_shift_{func.shift}"] = func(dfc[target])
-
+                            
         dfc = dfc.dropna()
         return dfc
 
@@ -568,13 +562,10 @@ class VARModel:
         forecasts = {i: [] for i in self.target_cols}
 
         # Trend forecasting
-        if self.trend is not None:
-            trend_preds = {i: [] for i in self.trend_types}
-            for k, tr in self.trend_types.items():
-                if tr in ["linear", "feature_lr"]:
-                    trend_preds[k] = self.tr_models[k].predict(np.arange(self.len, self.len+H).reshape(-1, 1))
-                elif tr in ["ses", "feature_ses"]:
-                    trend_preds[k] = self.tr_models[k].forecast(H).values
+        for k, v in self.trend.items():
+            orig_targets = {}
+            if v:
+                orig_targets[k] = self.orig_targets[k].tolist()  # Store original values for later use during forecasting
 
         for t in range(H):
             # Exogenous input for step t
@@ -599,18 +590,25 @@ class VARModel:
                     for func in funcs:
                         transform_lag.append(func(series_array, is_forecast=True).to_numpy()[-1])
 
-            # Trend feature
-            trend_var = []
-            if self.trend is not None:
-                for k, tr in self.trend_types.items():
-                    if tr in ["feature_lr", "feature_ses"]:
-                        trend_var.append(trend_preds[k][t])
 
-            inp = exo_inp + lags + transform_lag + trend_var
+            inp = exo_inp + lags + transform_lag
             pred = self.predict(inp)
+            # Add back trend
             for id_, ff in enumerate(forecasts):
-                forecasts[ff].append(pred[id_])
-                y_lists[ff].append(pred[id_])
+                if self.trend[ff]:
+                    if self.trend_types[ff] == "linear":
+                        trend_fit = LinearRegression().fit(np.arange(self.len + t).reshape(-1, 1), np.array(orig_targets[ff]))
+                        trend_forecast = trend_fit.predict(np.array([[self.len + t]]))[0]
+                    else:
+                        trend_fit = ExponentialSmoothing(np.array(orig_targets[ff]), **self.ets_params[k][0]).fit(**self.ets_params[k][1])
+                        trend_forecast = trend_fit.forecast(1)[0]
+                    orig_forecast = pred[id_] + trend_forecast
+                    forecasts[k] = orig_forecast
+                    orig_targets[k].append(orig_forecast)  # Update original targets with the forecasted value for the next iteration
+                    y_lists[ff].append(pred[id_]) # Append the pure prediction without trend adjustment for obtaining the next lags
+                else:
+                    forecasts[ff].append(pred[id_])
+                    y_lists[ff].append(pred[id_])
 
         # Invert seasonal difference
         if self.season_diffs is not None:
@@ -622,11 +620,6 @@ class VARModel:
             for d in self.diffs:
                 forecasts[d] = undiff_ts(self.origs[d], np.array(forecasts[d]), self.diffs[d])
 
-        # Add back trend
-        if self.trend is not None:
-            for k, tr in self.trend_types.items():
-                if tr in ["linear", "ses"]:
-                    forecasts[k] = trend_preds[k] + forecasts[k]
 
         # Non-negativity
         for f in forecasts:
@@ -686,10 +679,8 @@ class VARModel:
             self.cv_forecasts_df = pd.concat([self.cv_forecasts_df, forecast_df], axis=0)
 
             for m in metrics:
-                if m.__name__ == 'mean_squared_error':
-                    eval_score = m(y_test, bb_forecast, squared=False)
-                elif m.__name__ in ['MeanAbsoluteScaledError', 'MedianAbsoluteScaledError']:
-                    eval_score = m(y_test, bb_forecast, np.array(train[self.target_cols]))
+                if m.__name__ == 'MASE':
+                    eval_score = m(y_test, bb_forecast, train[target_col])
                 else:
                     eval_score = m(y_test, bb_forecast)
                 self.metrics_dict[m.__name__].append(eval_score)
@@ -868,19 +859,22 @@ class ml_bidirect_forecaster:
             # Handle trend removal if specified
             # if atleast one target column has a trend, we need to apply the trend removal
             if self.trend[self.target_cols[0]] or self.trend[self.target_cols[1]]:
-                self.len = len(dfc)
+                self.len = len(df) # Store the length of the dataframe for later use
                 if self.trend[self.target_cols[0]]:
+                    self.orig_target1 = df[self.target_cols[0]] # Store original values for later use during forecasting
                     if self.trend_type[self.target_cols[0]] == "linear":
-                        self.lr_model1 = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), dfc[self.target_cols[0]])
+                        self.lr_model1 = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), self.orig_target1)
                         dfc[self.target_cols[0]] = dfc[self.target_cols[0]] - self.lr_model1.predict(np.arange(self.len).reshape(-1, 1))
+
                     if self.trend_type[self.target_cols[0]] == "ets":
-                        self.orig_target1 = df[self.target_cols[0]] # Store original values for later use during forecasting
                         self.ses_model1 = ExponentialSmoothing(self.orig_target1, **self.ets_params[self.target_cols[0]][0]).fit(**self.ets_params[self.target_cols[0]][1])
                         dfc[self.target_cols[0]] = dfc[self.target_cols[0]] - self.ses_model1.fittedvalues.values
+
                 # If the second target column has a trend, apply the same logic
                 if self.trend[self.target_cols[1]]:
+                    self.orig_target2 = df[self.target_cols[1]] # Store original values for later use during forecasting
                     if self.trend_type[self.target_cols[1]] == "linear":
-                        self.lr_model2 = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), dfc[self.target_cols[1]])
+                        self.lr_model2 = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), self.orig_target2)
                         dfc[self.target_cols[1]] = dfc[self.target_cols[1]] - self.lr_model2.predict(np.arange(self.len).reshape(-1, 1))
 
                     if self.trend_type[self.target_cols[1]] == "ets":
@@ -922,18 +916,18 @@ class ml_bidirect_forecaster:
                         else:
                             dfc[f"trg{idx}_{func.__class__.__name__}_{func.window_size}_shift_{func.shift}"] = func(dfc[target])
             # Add trend features if specified
-            # if self.trend[self.target_cols[0]]:
-            #     # if self.target_cols[0] in dfc.columns:
-            #     if self.trend_type[self.target_cols[0]] == "feature_lr":
-            #         dfc["trend1"] = self.lr_model1.predict(np.arange(self.len).reshape(-1, 1))
-            #     if self.trend_type[self.target_cols[0]] == "feature_ses":
-            #         dfc["trend1"] = self.ses_model1.fittedvalues.values
-            #     # if self.target_cols[1] in dfc.columns:
-            # if self.trend[self.target_cols[1]]:
-            #     if self.trend_type[self.target_cols[1]] == "feature_lr":
-            #         dfc["trend2"] = self.lr_model2.predict(np.arange(self.len).reshape(-1, 1))
-            #     if self.trend_type[self.target_cols[1]] == "feature_ses":
-            #         dfc["trend2"] = self.ses_model2.fittedvalues.values
+            if self.trend[self.target_cols[0]]:
+                # if self.target_cols[0] in dfc.columns:
+                if self.trend_type[self.target_cols[0]] == "feature_lr":
+                    dfc["trend1"] = self.lr_model1.predict(np.arange(self.len).reshape(-1, 1))
+                if self.trend_type[self.target_cols[0]] == "feature_ses":
+                    dfc["trend1"] = self.ses_model1.fittedvalues.values
+                # if self.target_cols[1] in dfc.columns:
+            if self.trend[self.target_cols[1]]:
+                if self.trend_type[self.target_cols[1]] == "feature_lr":
+                    dfc["trend2"] = self.lr_model2.predict(np.arange(self.len).reshape(-1, 1))
+                if self.trend_type[self.target_cols[1]] == "feature_ses":
+                    dfc["trend2"] = self.ses_model2.fittedvalues.values
 
         return dfc.dropna()
             
@@ -981,17 +975,9 @@ class ml_bidirect_forecaster:
         tar2_forecasts = []
 
         if self.trend[self.target_cols[0]]:
-            if self.trend_type[self.target_cols[0]] == "linear":
-                trend_pred1 = self.lr_model1.predict(np.arange(self.len, self.len + n_ahead).reshape(-1, 1))
-            elif self.trend_type[self.target_cols[0]] == "ets":
-                orig_target1 = self.orig_target1.tolist()
-                # trend_pred1 = self.ses_model1.forecast(n_ahead).values
+            orig_target1 = self.orig_target1.tolist()
         if self.trend[self.target_cols[1]]:
-            if self.trend_type[self.target_cols[1]] == "linear":
-                trend_pred2 = self.lr_model2.predict(np.arange(self.len, self.len + n_ahead).reshape(-1, 1))
-            elif self.trend_type[self.target_cols[1]] == "ets":
-                orig_target2 = self.orig_target2.tolist()
-                # trend_pred2 = self.ses_model2.forecast(n_ahead).values
+            orig_target2 = self.orig_target2.tolist()
 
         # Forecast recursively one step at a time
         for i in range(n_ahead):
@@ -1016,8 +1002,30 @@ class ml_bidirect_forecaster:
                     for func in funcs:
                         transform_lag.append(func(series_array, is_forecast=True).to_numpy()[-1])
 
+            # Trend feature
+            trend_var = []
 
-            inp = x_var + inp_lag + transform_lag
+            if (self.trend[self.target_cols[0]]):
+                if self.trend_type[self.target_cols[0]] in ["ets", "feature_ets"]:
+                    trend_fit1 = ExponentialSmoothing(np.array(orig_target1), **self.ets_params[self.target_cols[0]][0]).fit(**self.ets_params[self.target_cols[0]][1])
+                    trend_forecast1 = trend_fit1.forecast(1)[0] # Forecasting one step ahead
+                else:
+                    trend_fit1 = LinearRegression().fit(np.arange(self.len + i).reshape(-1, 1), np.array(orig_target1))
+                    trend_forecast1 = trend_fit1.predict(np.array([[self.len + i]]))[0] # Predicting the next value trend
+
+                if self.trend_type[self.target_cols[0]] in ["feature_lr", "feature_ets"]:
+                    trend_var.append(trend_forecast1)
+            if (self.trend[self.target_cols[1]]):
+                if self.trend_type[self.target_cols[1]] in ["ets", "feature_ets"]:
+                    trend_fit2 = ExponentialSmoothing(np.array(orig_target2), **self.ets_params[self.target_cols[1]][0]).fit(**self.ets_params[self.target_cols[1]][1])
+                    trend_forecast2 = trend_fit2.forecast(1)[0] # Forecasting one step ahead
+                else:
+                    trend_fit2 = LinearRegression().fit(np.arange(self.len + i).reshape(-1, 1), np.array(orig_target2))
+                    trend_forecast2 = trend_fit2.predict(np.array([[self.len + i]]))[0] # Predicting the next value trend
+                if self.trend_type[self.target_cols[1]] in ["feature_lr", "feature_ets"]:
+                    trend_var.append(trend_forecast2)
+
+            inp = x_var + inp_lag + transform_lag + trend_var
             # print(f"len of x_var: {len(x_var)}, len of inp_lag1: {len(inp_lag1)}, len of inp_lag2: {len(inp_lag2)}, len of transform_lag: {len(transform_lag)}, len of inp: {len(inp)}")
 
             df_inp = pd.DataFrame(inp).T
@@ -1028,21 +1036,21 @@ class ml_bidirect_forecaster:
             target1_lags.append(pred1)
             pred2 = self.model2_fit.predict(df_inp)[0]
             target2_lags.append(pred2)
-            if (self.trend[self.target_cols[0]]) and (self.trend_type[self.target_cols[0]] == "ets"):
-                    ses_fit1 = ExponentialSmoothing(np.array(orig_target1), **self.ets_params[self.target_cols[0]][0]).fit(**self.ets_params[self.target_cols[0]][1])
-                    ses_forecast1 = ses_fit1.forecast(1)[0]
-                    orig_pred1 = pred1 + ses_forecast1
+
+            # If trend is applied, add the trend forecast to the prediction
+            if (self.trend[self.target_cols[0]]):
+                if self.trend_type[self.target_cols[0]] in ["ets", "linear"]:
+                    orig_pred1 = pred1 + trend_forecast1
                     tar1_forecasts.append(orig_pred1)
                     orig_target1.append(orig_pred1)
             else:
                 tar1_forecasts.append(pred1)
 
-            if (self.trend[self.target_cols[1]]) and (self.trend_type[self.target_cols[1]] == "ets"):
-                ses_fit2 = ExponentialSmoothing(np.array(orig_target2), **self.ets_params[self.target_cols[1]][0]).fit(**self.ets_params[self.target_cols[1]][1])
-                ses_forecast2 = ses_fit2.forecast(1)[0]
-                orig_pred2 = pred2 + ses_forecast2
-                tar2_forecasts.append(orig_pred2)
-                orig_target2.append(orig_pred2)
+            if self.trend[self.target_cols[1]]:
+                if self.trend_type[self.target_cols[1]] in ["ets", "linear"]:
+                    orig_pred2 = pred2 + trend_forecast2
+                    tar2_forecasts.append(orig_pred2)
+                    orig_target2.append(orig_pred2)
             else:
                 tar2_forecasts.append(pred2)
                 # print(f'new_pred1: {new_pred1}, ses_forecast1: {ses_forecast1}, pred1: {pred1}, new_pred2: {new_pred2}, ses_forecast2: {ses_forecast2}, pred2: {pred2}')
@@ -1059,10 +1067,7 @@ class ml_bidirect_forecaster:
             forecasts1 = undiff_ts(self.orig1, forecasts1, self.difference[self.target_cols[0]])
         if self.difference[self.target_cols[1]] is not None:
             forecasts2 = undiff_ts(self.orig2, forecasts2, self.difference[self.target_cols[1]])
-        if (self.trend[self.target_cols[0]]) and (self.trend_type[self.target_cols[0]] == "linear"):
-            forecasts1 = trend_pred1 + forecasts1
-        if (self.trend[self.target_cols[1]]) and (self.trend_type[self.target_cols[1]] == "linear"):
-            forecasts2 = trend_pred2 + forecasts2
+
         forecasts1 = np.array([max(0, x) for x in forecasts1])
         forecasts2 = np.array([max(0, x) for x in forecasts2])
         if self.box_cox[self.target_cols[0]]:
