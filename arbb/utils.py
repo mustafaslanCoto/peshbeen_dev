@@ -11,6 +11,8 @@ from numba import jit
 from statsmodels.tsa.stattools import adfuller, kpss
 from hyperopt import fmin, tpe, hp, Trials, STATUS_OK, space_eval
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from matplotlib import pyplot
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -50,8 +52,6 @@ def unit_root_test(series, method = "ADF", n_lag = None):
         return print('Enter a valid unit root test method')
 
 ## Serial Corelation Check
-from matplotlib import pyplot
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 def plot_PACF_ACF(series, lag_num, figsize = (15, 8)):
     """
     Plots the Partial Autocorrelation Function (PACF) and Autocorrelation Function (ACF) of a time series.
@@ -559,38 +559,6 @@ def var_backward_lag_selection(df, model, max_lags, min_lags, n_folds,target_col
                 orj_lags = {i:[item for item in orj_lags[i] if item not in best_lags[i]] for i in max_lags}
     return best_lags
 
-
-#------------------------------------------------------------------------------
-# K-Fold Target Encoding
-#------------------------------------------------------------------------------
-
-def Kfold_target(train, test, cat_var, target_col, encoded_colname, split_num):
-    """ 
-    Perform K-Fold encoding for categorical variables.
-
-    Args:
-        train (pd.DataFrame): Training dataset.
-        test (pd.DataFrame): Test dataset.
-        cat_var (str): Categorical variable to encode.
-        target_col (str): Target variable for encoding.
-        encoded_colname (str): Name of the new encoded column.
-        split_num (int): Number of splits for K-Fold encoding.
-    Returns:
-        pd.DataFrame: Updated training and test datasets with the new encoded column.
-    """
-    from sklearn.model_selection import KFold
-    kf = KFold(n_splits = split_num, shuffle = True)
-    train[encoded_colname] = np.nan
-    for tr_ind, val_ind in kf.split(train):
-        X_tr, X_val = train.iloc[tr_ind], train.iloc[val_ind]
-        cal_df = X_tr.groupby(cat_var)[target_col].mean().reset_index()
-        train.loc[train.index[val_ind], encoded_colname] = X_val[cat_var].merge(cal_df, on = cat_var, how = "left")[target_col].values
-        
-    train.loc[train[encoded_colname].isnull(), encoded_colname] = train[train[encoded_colname].isnull()][encoded_colname].mean()
-    map_df = train.groupby(cat_var)[encoded_colname].mean().reset_index()
-    test[encoded_colname] = test[cat_var].merge(map_df, on = cat_var, how= "left")[encoded_colname].values
-    test.loc[test[encoded_colname].isnull(), encoded_colname] = map_df[encoded_colname].mean()
-    return train, test
 
 #------------------------------------------------------------------------------
 # Evaluation Metrics
