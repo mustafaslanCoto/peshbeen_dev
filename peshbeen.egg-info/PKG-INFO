@@ -1,11 +1,11 @@
 Metadata-Version: 2.4
-Name: ARBB
-Version: 0.0.1
+Name: peshbeen
+Version: 0.0.2
 Summary: Auto regressive bagging and boosting package
-Home-page: https://github.com/mustafaslanCoto/ARML
+Home-page: https://github.com/mustafaslanCoto/peshbeen
 Author: Mustafa Aslan
 Author-email: <mustafaslan63@email.com>
-Keywords: python,first package
+Keywords: python,peshbeen,forecasting,time series,machine learning
 Classifier: Development Status :: 3 - Alpha
 Classifier: Intended Audience :: Data Scientists
 Classifier: Programming Language :: Python :: 2

@@ -20,7 +20,7 @@ from hyperopt import fmin, tpe, hp, Trials, STATUS_OK, space_eval
 from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
 from sklearn.ensemble import RandomForestRegressor, AdaBoostRegressor, HistGradientBoostingRegressor
-from arbb.utils import (box_cox_transform, back_box_cox_transform, undiff_ts, seasonal_diff,
+from peshbeen.utils import (box_cox_transform, back_box_cox_transform, undiff_ts, seasonal_diff,
                         invert_seasonal_diff, kfold_target_encoder, target_encoder_for_test,
                         rolling_quantile, rolling_mean, rolling_std,
                         expanding_mean, expanding_std, expanding_quantile)
