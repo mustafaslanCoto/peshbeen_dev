@@ -23,7 +23,7 @@ from sklearn.ensemble import RandomForestRegressor, AdaBoostRegressor, HistGradi
 from peshbeen.utils import (box_cox_transform, back_box_cox_transform, undiff_ts, seasonal_diff,
                         invert_seasonal_diff, kfold_target_encoder, target_encoder_for_test,
                         rolling_quantile, rolling_mean, rolling_std,
-                        expanding_mean, expanding_std, expanding_quantile)
+                        expanding_mean, expanding_std, expanding_quantile, ParametricTimeSeriesSplit)
 from catboost import CatBoostRegressor
 from cubist import Cubist
 # dot not show warnings
@@ -139,13 +139,13 @@ class ml_forecaster:
             # Detrend the series if specified
             if self.trend is not None:
                 self.len = len(df)
-                self.target_orig = df[self.target_col] # Store original values for later use during forecasting
+                self.target_orig = dfc[self.target_col] # Store original values for later use during forecasting
                 if self.trend in ["linear", "feature_lr"]:
                     self.lr_model = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), dfc[self.target_col])
                     if self.trend == "linear":
                         dfc[self.target_col] = dfc[self.target_col] - self.lr_model.predict(np.arange(self.len).reshape(-1, 1))
                 if self.trend in ["ets", "feature_ets"]:
-                    self.ets_model = ExponentialSmoothing(df[self.target_col], **self.ets_model).fit(**self.ets_fit)
+                    self.ets_model = ExponentialSmoothing(dfc[self.target_col], **self.ets_model).fit(**self.ets_fit)
                     if self.trend == "ets":
                         dfc[self.target_col] = dfc[self.target_col] - self.ets_model.fittedvalues.values
 
@@ -441,15 +441,17 @@ class VARModel:
             # Detrending
             if self.trend is not None:
                 self.len = df.shape[0]
-                self.orig_targets = {i: df[i] for i in self.trend.keys()}  # Store original values for later use during forecasting
+                self.orig_targets = {i: dfc[i] for i in self.trend.keys()}  # Store original values for later use during forecasting
                 for k, v in self.trend.items():
-                    if v: # If trend removal is required for this target
-                        if self.trend[k] == "linear":
-                            model_fit = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), self.orig_targets[k])
-                            dfc[k] = dfc[k] - model_fit.predict(np.arange(self.len).reshape(-1, 1))
-                        else: # ets
-                            model_fit = ExponentialSmoothing(self.orig_targets[k], **self.ets_params[k][0]).fit(**self.ets_params[k][1])
-                            dfc[k] = dfc[k] - model_fit.fittedvalues.values
+                    if v == "linear": # If trend removal is required for this target
+                        model_fit = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), self.orig_targets[k])
+                        dfc[k] = dfc[k] - model_fit.predict(np.arange(self.len).reshape(-1, 1))
+                    elif v == "ets": # ets
+                        model_fit = ExponentialSmoothing(self.orig_targets[k], **self.ets_params[k][0]).fit(**self.ets_params[k][1])
+                        dfc[k] = dfc[k] - model_fit.fittedvalues.values
+
+                    else:
+                        raise ValueError(f"Unknown trend type: {v} for target {k}. Use 'linear' or 'ets'.")
 
             # Differencing
             if self.diffs is not None:
@@ -553,12 +555,9 @@ class VARModel:
 
         forecasts = {i: [] for i in self.target_cols}
 
-        # Trend forecasting
+        # Store original values for later estimate trend components
         if self.trend is not None:
-            for k, v in self.trend.items():
-                orig_targets = {}
-                if v:
-                    orig_targets[k] = self.orig_targets[k].tolist()  # Store original values for later use during forecasting
+            orig_targets = {k: self.orig_targets[k].tolist() for k in self.trend.keys()}
 
         for t in range(H):
             # Exogenous input for step t
@@ -596,10 +595,12 @@ class VARModel:
                     elif self.trend.get(ff) == "ets":
                         trend_fit = ExponentialSmoothing(np.array(orig_targets[ff]), **self.ets_params[ff][0]).fit(**self.ets_params[ff][1])
                         trend_forecast = trend_fit.forecast(1)[0]
+                    else:
+                        raise ValueError(f"Unknown trend type for forecast '{ff}': {self.trend.get(ff)}")
                     orig_forecast = pred[id_] + trend_forecast
                     forecasts[k] = orig_forecast
                     orig_targets[k].append(orig_forecast)  # Update original targets with the forecasted value for the next iteration
-                    y_lists[ff].append(pred[id_]) # Append the pure prediction without trend adjustment for obtaining the next lags
+                    y_lists[ff].append(pred[id_])  # Append the pure prediction without trend adjustment for obtaining the next lags
                 else:
                     forecasts[ff].append(pred[id_])
                     y_lists[ff].append(pred[id_])
@@ -635,6 +636,7 @@ class VARModel:
         target_col: str,
         cv_split: int,
         test_size: int,
+        step_size: None,
         metrics: List[Callable]
     ) -> pd.DataFrame:
         """
@@ -650,6 +652,8 @@ class VARModel:
             Number of cross-validation folds.
         test_size : int
             Test size per fold.
+        step_size : int
+            Step size for rolling window. Default is None. Test size is applied
         metrics : List[Callable]
             List of metric functions.
 
@@ -659,6 +663,7 @@ class VARModel:
             DataFrame with averaged cross-validation metric scores.
         """
         tscv = TimeSeriesSplit(n_splits=cv_split, test_size=test_size)
+        tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
         self.metrics_dict = {m.__name__: [] for m in metrics}
         self.cv_forecasts_df = pd.DataFrame()
 
@@ -839,13 +844,13 @@ class ml_bidirect_forecaster:
             if self.trend is not None:
                 self.len = len(df) # Store the length of the dataframe for later use
                 if self.trend.get(self.target_cols[0]) in ["linear", "feature_lr"]:
-                    self.orig_target1 = df[self.target_cols[0]] # Store original values for later use during forecasting
+                    self.orig_target1 = dfc[self.target_cols[0]] # Store original values for later use during forecasting
                     self.lr_model1 = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), self.orig_target1)
                     if self.trend.get(self.target_cols[0]) == "linear":
                         dfc[self.target_cols[0]] = dfc[self.target_cols[0]] - self.lr_model1.predict(np.arange(self.len).reshape(-1, 1))
 
                 if self.trend.get(self.target_cols[0]) in ["ets", "feature_ets"]:
-                    self.orig_target1 = df[self.target_cols[0]] # Store original values for later use during forecasting
+                    self.orig_target1 = dfc[self.target_cols[0]] # Store original values for later use during forecasting
                     self.ses_model1 = ExponentialSmoothing(self.orig_target1, **self.ets_params[self.target_cols[0]][0]).fit(**self.ets_params[self.target_cols[0]][1])
                     if self.trend.get(self.target_cols[0]) == "ets":
                         dfc[self.target_cols[0]] = dfc[self.target_cols[0]] - self.ses_model1.fittedvalues.values
@@ -992,7 +997,7 @@ class ml_bidirect_forecaster:
                 if self.trend.get(self.target_cols[0]) in ["ets", "feature_ets"]:
                     trend_fit1 = ExponentialSmoothing(np.array(orig_target1), **self.ets_params[self.target_cols[0]][0]).fit(**self.ets_params[self.target_cols[0]][1])
                     trend_forecast1 = trend_fit1.forecast(1)[0] # Forecasting one step ahead
-                else:
+                elif self.trend.get(self.target_cols[0]) in ["linear", "feature_lr"]:
                     trend_fit1 = LinearRegression().fit(np.arange(self.len + i).reshape(-1, 1), np.array(orig_target1))
                     trend_forecast1 = trend_fit1.predict(np.array([[self.len + i]]))[0] # Predicting the next value trend
 
@@ -1004,9 +1009,10 @@ class ml_bidirect_forecaster:
                 if self.trend.get(self.target_cols[1]) in ["ets", "feature_ets"]:
                     trend_fit2 = ExponentialSmoothing(np.array(orig_target2), **self.ets_params[self.target_cols[1]][0]).fit(**self.ets_params[self.target_cols[1]][1])
                     trend_forecast2 = trend_fit2.forecast(1)[0] # Forecasting one step ahead
-                else:
+                elif self.trend.get(self.target_cols[1]) in ["linear", "feature_lr"]:
                     trend_fit2 = LinearRegression().fit(np.arange(self.len + i).reshape(-1, 1), np.array(orig_target2))
                     trend_forecast2 = trend_fit2.predict(np.array([[self.len + i]]))[0] # Predicting the next value trend
+                
                 if self.trend.get(self.target_cols[1]) in ["feature_lr", "feature_ets"]:
                     trend_var.append(trend_forecast2)
 
