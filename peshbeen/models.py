@@ -838,26 +838,30 @@ class ml_bidirect_forecaster:
             # if atleast one target column has a trend, we need to apply the trend removal
             if self.trend is not None:
                 self.len = len(df) # Store the length of the dataframe for later use
-                if self.trend.get(self.target_cols[0]) == "linear":
+                if self.trend.get(self.target_cols[0]) in ["linear", "feature_lr"]:
                     self.orig_target1 = df[self.target_cols[0]] # Store original values for later use during forecasting
                     self.lr_model1 = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), self.orig_target1)
-                    dfc[self.target_cols[0]] = dfc[self.target_cols[0]] - self.lr_model1.predict(np.arange(self.len).reshape(-1, 1))
+                    if self.trend.get(self.target_cols[0]) == "linear":
+                        dfc[self.target_cols[0]] = dfc[self.target_cols[0]] - self.lr_model1.predict(np.arange(self.len).reshape(-1, 1))
 
-                if self.trend.get(self.target_cols[0]) == "ets":
+                if self.trend.get(self.target_cols[0]) in ["ets", "feature_ets"]:
                     self.orig_target1 = df[self.target_cols[0]] # Store original values for later use during forecasting
                     self.ses_model1 = ExponentialSmoothing(self.orig_target1, **self.ets_params[self.target_cols[0]][0]).fit(**self.ets_params[self.target_cols[0]][1])
-                    dfc[self.target_cols[0]] = dfc[self.target_cols[0]] - self.ses_model1.fittedvalues.values
+                    if self.trend.get(self.target_cols[0]) == "ets":
+                        dfc[self.target_cols[0]] = dfc[self.target_cols[0]] - self.ses_model1.fittedvalues.values
 
                 # If the second target column has a trend, apply the same logic
-                if self.trend.get(self.target_cols[1]) == "linear":
+                if self.trend.get(self.target_cols[1]) in ["linear", "feature_lr"]:
                     self.orig_target2 = df[self.target_cols[1]] # Store original values for later use during forecasting
                     self.lr_model2 = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), self.orig_target2)
-                    dfc[self.target_cols[1]] = dfc[self.target_cols[1]] - self.lr_model2.predict(np.arange(self.len).reshape(-1, 1))
+                    if self.trend.get(self.target_cols[1]) == "linear":
+                        dfc[self.target_cols[1]] = dfc[self.target_cols[1]] - self.lr_model2.predict(np.arange(self.len).reshape(-1, 1))
 
-                if self.trend.get(self.target_cols[1]) == "ets":
+                if self.trend.get(self.target_cols[1]) in ["ets", "feature_ets"]:
                     self.orig_target2 = df[self.target_cols[1]] # Store original values for later use during forecasting
                     self.ses_model2 = ExponentialSmoothing(self.orig_target2, **self.ets_params[self.target_cols[1]][0]).fit(**self.ets_params[self.target_cols[1]][1])
-                    dfc[self.target_cols[1]] = dfc[self.target_cols[1]] - self.ses_model2.fittedvalues.values
+                    if self.trend.get(self.target_cols[1]) == "ets":
+                        dfc[self.target_cols[1]] = dfc[self.target_cols[1]] - self.ses_model2.fittedvalues.values
 
             # Handle differencing if specified
             if self.difference[self.target_cols[0]] is not None:
@@ -953,9 +957,9 @@ class ml_bidirect_forecaster:
 
 
         if self.trend is not None:
-            if self.trend.get(self.target_cols[0]):
+            if self.trend.get(self.target_cols[0]) is not None:
                 orig_target1 = self.orig_target1.tolist()
-            if self.trend.get(self.target_cols[1]):
+            if self.trend.get(self.target_cols[1]) is not None:
                 orig_target2 = self.orig_target2.tolist()
 
         # Forecast recursively one step at a time
