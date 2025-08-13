@@ -1079,60 +1079,60 @@ def tune_ets(data, param_space, cv_splits, horizon, eval_metric, eval_num, step_
     tscv = ParametricTimeSeriesSplit(n_splits=cv_splits, test_size=horizon, step_size=step_size)
     # Define the objective function for hyperparameter tuning
     def objective(params):
-        if (params["trend"] != None) & (params["seasonal"] != None): # Both trend and seasonal are specified
-            alpha = params['smoothing_level'] # Smoothing level for the level component
-            beta = params['smoothing_trend'] # Smoothing level for the trend component
-            gamma = params['smoothing_seasonal'] # Smoothing level for the seasonal component
-            trend_type = params['trend'] # Trend type
-            season_type = params['seasonal'] # Seasonal type
-            S = params['seasonal_periods'] # Seasonal periods
-            if params["damped_trend"]: # Damped trend
-                damped_bool = params["damped_trend"]
-                damp_trend = params['damping_trend']
+        if (params.get("trend") != None) & (params.get("seasonal") != None): # Both trend and seasonal are specified
+            alpha = params.get('smoothing_level') # Smoothing level for the level component
+            beta = params.get('smoothing_trend') # Smoothing level for the trend component
+            gamma = params.get('smoothing_seasonal') # Smoothing level for the seasonal component
+            trend_type = params.get('trend') # Trend type
+            season_type = params.get('seasonal') # Seasonal type
+            S = params.get('seasonal_periods') # Seasonal periods
+            if params.get("damped_trend"): # Damped trend
+                damped_bool = params.get("damped_trend")
+                damp_trend = params.get('damping_trend')
             else:
-                damped_bool = params["damped_trend"]
+                damped_bool = params.get("damped_trend")
                 damp_trend = None
 
-        elif (params["trend"] != None) & (params["seasonal"] == None): # Trend is specified, seasonal is not
-            alpha = params['smoothing_level']
-            beta = params['smoothing_trend']
+        elif (params.get("trend") != None) & (params.get("seasonal") == None): # Trend is specified, seasonal is not
+            alpha = params.get('smoothing_level')
+            beta = params.get('smoothing_trend')
             gamma = None
-            trend_type = params['trend']
-            season_type = params['seasonal']
+            trend_type = params.get('trend')
+            season_type = params.get('seasonal')
             S=None
-            if params["damped_trend"] == True:
-                damped_bool = params["damped_trend"]
-                damp_trend = params['damping_trend']
+            if params.get("damped_trend"):
+                damped_bool = params.get("damped_trend")
+                damp_trend = params.get('damping_trend')
             else:
-                damped_bool = params["damped_trend"]
+                damped_bool = params.get("damped_trend")
                 damp_trend = None
-                
-        elif (params["trend"] == None) & (params["seasonal"] != None): # Seasonal is specified, trend is not
-            alpha = params['smoothing_level']
+
+        elif (params.get("trend") == None) & (params.get("seasonal") != None): # Seasonal is specified, trend is not
+            alpha = params.get('smoothing_level')
             beta = None
-            gamma = params['smoothing_seasonal']
-            trend_type = params['trend']
-            season_type = params['seasonal']
-            S=params['seasonal_periods']
-            if params["damped_trend"] == True:
+            gamma = params.get('smoothing_seasonal')
+            trend_type = params.get('trend')
+            season_type = params.get('seasonal')
+            S = params.get('seasonal_periods')
+            if params.get("damped_trend"):
                 damped_bool = False
                 damp_trend = None
             else:
-                damped_bool = params["damped_trend"]
+                damped_bool = params.get("damped_trend")
                 damp_trend = None
                 
         else: # Neither trend nor seasonal is specified
-            alpha = params['smoothing_level']
+            alpha = params.get('smoothing_level')
             beta = None
             gamma = None
-            trend_type = params['trend']
-            season_type = params['seasonal']
-            S=None
-            if params["damped_trend"] == True:
+            trend_type = params.get('trend')
+            season_type = params.get('seasonal')
+            S = None
+            if params.get("damped_trend"):
                 damped_bool = False
                 damp_trend = None
             else:
-                damped_bool = params["damped_trend"]
+                damped_bool = params.get("damped_trend")
                 damp_trend = None
             
 
