@@ -11,7 +11,7 @@ from numba import jit
 from statsmodels.tsa.stattools import adfuller, kpss
 from hyperopt import fmin, tpe, hp, Trials, STATUS_OK, space_eval
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
-from matplotlib import pyplot
+import matplotlib.pyplot as plt
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 import warnings
 warnings.filterwarnings("ignore")
@@ -52,23 +52,48 @@ def unit_root_test(series, method = "ADF", n_lag = None):
         return print('Enter a valid unit root test method')
 
 ## Serial Corelation Check
-def plot_PACF_ACF(series, lag_num, figsize = (15, 8)):
+
+def plot_PACF_ACF(series, lag_num=40, figsize=(15, 8), pacf_method='ywm', alpha=0.05, **kwargs):
     """
     Plots the Partial Autocorrelation Function (PACF) and Autocorrelation Function (ACF) of a time series.
-    Args:
-        series (pd.Series): The time series data.
-        lag_num (int): The number of lags to consider.
-        figsize (tuple): Size of the figure for the plots.
-    Returns:
-        None: Displays the plots of PACF and ACF.
-    """
-    fig, ax = pyplot.subplots(2,1, figsize=figsize)
-    plot_pacf(series, lags= lag_num, ax = ax[0])
-    plot_acf(series, lags= lag_num, ax = ax[1])
-    ax[0].grid(which='both')
-    ax[1].grid(which='both')
-    pyplot.show()
 
+    Args:
+        series (array-like): The time series data (pandas Series, numpy array, or list).
+        lag_num (int): The number of lags to consider (default=40).
+        figsize (tuple): Size of the figure for the plots.
+        pacf_method (str): PACF method for statsmodels (default='ywm').
+        alpha (float): Significance level for confidence intervals (default=0.05).
+        show (bool): Whether to display the plot (default=True).
+        **kwargs: Additional keyword arguments passed to plot_acf and plot_pacf.
+
+    Returns:
+        (fig, axes): Matplotlib Figure and axes array.
+    """
+    # Convert input to pandas Series if necessary
+    if not isinstance(series, pd.Series):
+        try:
+            series = pd.Series(series)
+        except Exception as e:
+            raise ValueError("Input series must be convertible to a pandas Series or be a numpy array.") from e
+
+    if not isinstance(lag_num, int) or lag_num < 1:
+        raise ValueError("lag_num must be a positive integer.")
+
+    fig, axes = plt.subplots(2, 1, figsize=figsize)
+    plot_pacf(series, lags=lag_num, ax=axes[0], method=pacf_method, alpha=alpha, **kwargs)
+    axes[0].set_title('Partial Autocorrelation Function (PACF)')
+    axes[0].set_xlabel('Lag')
+    axes[0].set_ylabel('Partial Autocorrelation')
+    axes[0].grid(True)
+
+    plot_acf(series, lags=lag_num, ax=axes[1], alpha=alpha, **kwargs)
+    axes[1].set_title('Autocorrelation Function (ACF)')
+    axes[1].set_xlabel('Lag')
+    axes[1].set_ylabel('Autocorrelation')
+    axes[1].grid(True)
+
+    fig.tight_layout()
+    plt.show()
 #------------------------------------------------------------------------------
 # Transformation Utility Functions
 #------------------------------------------------------------------------------
