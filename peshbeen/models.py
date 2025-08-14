@@ -48,7 +48,7 @@ class ml_forecaster:
         box_cox (bool, optional): Whether to perform a Box–Cox transformation.
         box_cox_lmda (float, optional): The lambda value for Box–Cox.
         box_cox_biasadj (bool, optional): If True, adjust bias after Box–Cox inversion. Default is False.
-        lag_transform (dict, optional): Dictionary specifying additional lag transformations.
+        lag_transform (list, optional): List specifying additional lag transformations.
     """
     def __init__(self, model, target_col, cat_variables=None, target_encode=False, n_lag=None, difference=None, seasonal_diff=None,
                  trend=None, ets_params=None, box_cox=False, box_cox_lmda=None,
@@ -145,9 +145,9 @@ class ml_forecaster:
                     if self.trend == "linear":
                         dfc[self.target_col] = dfc[self.target_col] - self.lr_model.predict(np.arange(self.len).reshape(-1, 1))
                 if self.trend in ["ets", "feature_ets"]:
-                    self.ets_model = ExponentialSmoothing(dfc[self.target_col], **self.ets_model).fit(**self.ets_fit)
+                    self.fit_ets = ExponentialSmoothing(dfc[self.target_col], **self.ets_model).fit(**self.ets_fit)
                     if self.trend == "ets":
-                        dfc[self.target_col] = dfc[self.target_col] - self.ets_model.fittedvalues.values
+                        dfc[self.target_col] = dfc[self.target_col] - self.fit_ets.fittedvalues.values
 
             # Apply differencing if specified
             if self.difference is not None or self.season_diff is not None:
