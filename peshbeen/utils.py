@@ -513,6 +513,7 @@ def backward_lag_selection(df, max_lags,min_lags, n_folds, H, model, metrics, st
             scores = my_cv["score"].tolist()
             if scores<best_score:
                 best_lags = lags_to_test
+                best_score = scores
                 worst_lag = lg
         if worst_lag is not None:
             # lags.append(best_lag)
