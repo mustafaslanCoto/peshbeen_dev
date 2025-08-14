@@ -418,7 +418,8 @@ class expanding_ets:
 # Lag Selection Algorithms
 #------------------------------------------------------------------------------
 
-def forward_lag_selection(df, max_lags, n_folds, H, model, model_params, metrics, verbose = False):
+def forward_lag_selection(df, max_lags, n_folds, H, model, metrics,
+                          step_size = None, verbose = False):
     """
     Performs forward lag selection for Regression models.
     Args:
@@ -429,6 +430,7 @@ def forward_lag_selection(df, max_lags, n_folds, H, model, model_params, metrics
         model: The forecasting model to be used.
         model_params (dict): Parameters for the model.
         metrics (list): List of metrics to evaluate the model.
+        step_size (int, optional): Step size for cross-validation. Defaults to None.
         verbose (bool, optional): Whether to print progress. Defaults to False.
     Returns:
         list: List of best lags selected.
@@ -446,8 +448,10 @@ def forward_lag_selection(df, max_lags, n_folds, H, model, model_params, metrics
             for lg in lags:
                 current_lag = best_lags + [lg]
                 current_lag.sort()
-                lag_model = model(**model_params, n_lag = current_lag)
-                my_cv = lag_model.cv(df, n_folds,H, metrics)
+                model.n_lag = current_lag
+                # lag_model = model(**model_params, n_lag = current_lag)
+                my_cv = cross_validate(model=model, df=df, cv_split=n_folds,
+                                       test_size=H, metrics=metrics, step_size=step_size)
                 scores = my_cv["score"].tolist()
                 if scores<best_score:
                     best_score = scores
@@ -472,7 +476,7 @@ def forward_lag_selection(df, max_lags, n_folds, H, model, model_params, metrics
             max_lag = len(orj_lags)
     return best_lags
 
-def backward_lag_selection(df, max_lags,min_lags, n_folds, H, model, model_params, metrics, forward_back=False, verbose = False):
+def backward_lag_selection(df, max_lags,min_lags, n_folds, H, model, metrics, step_size=None, forward_back=False, verbose = False):
     """
     Performs backward lag selection for Regression models.
     Args:
@@ -482,8 +486,8 @@ def backward_lag_selection(df, max_lags,min_lags, n_folds, H, model, model_param
         n_folds (int): Number of folds for cross-validation.
         H (int): Forecast horizon.
         model: The forecasting model to be used.
-        model_params (dict): Parameters for the model.
         metrics (list): List of metrics to evaluate the model.
+        step_size (int, optional): Step size for cross-validation. Defaults to None.
         forward_back (bool, optional): Whether to perform forward-backward selection. Defaults to False.
         verbose (bool, optional): Whether to print progress. Defaults to False.
     Returns:
@@ -502,8 +506,9 @@ def backward_lag_selection(df, max_lags,min_lags, n_folds, H, model, model_param
         for lg in lags:
             lags_to_test = [x for x in lags if x != lg]
             lags_to_test.sort()
-            lag_model = model(**model_params, n_lag = lags_to_test)
-            my_cv = lag_model.cv(df, n_folds,H, metrics)
+            model.n_lag = lags_to_test
+            my_cv = cross_validate(model=model, df=df, cv_split=n_folds,
+                                   test_size=H, metrics=metrics, step_size=step_size)
             scores = my_cv["score"].tolist()
             if scores<best_score:
                 best_lags = lags_to_test
@@ -532,8 +537,10 @@ def backward_lag_selection(df, max_lags,min_lags, n_folds, H, model, model_param
                 for lg in worst_lags:
                     current_lag = best_lags + [lg]
                     current_lag.sort()
-                    lag_model = model(**model_params, n_lag = current_lag)
-                    my_cv = lag_model.cv(df, n_folds,H, metrics)
+                    # lag_model = model(**model_params, n_lag = current_lag)
+                    model.n_lag = current_lag
+                    my_cv = cross_validate(model=model, df=df, cv_split=n_folds,
+                                           test_size=H, metrics=metrics, step_size=step_size)
                     scores = my_cv["score"].tolist()
                     if scores<best_score:
                         best_score = scores
@@ -561,9 +568,9 @@ def backward_lag_selection(df, max_lags,min_lags, n_folds, H, model, model_param
     return best_lags
 
 
-def var_forward_lag_selection(df, model, max_lags, target_col, n_folds, H, model_params, metrics, verbose = False):
+def var_forward_lag_selection(df, model, max_lags, target_col, n_folds, H, metrics, step_size=None, verbose = False):
     """
-    Performs forward lag selection for Vektor Autoregressive models.
+    Performs forward lag selection for Vektor Autoregressive models and bidirectional ml models
     Args:
         df (pd.DataFrame): DataFrame containing the time series data.
         model: The forecasting model to be used.
@@ -573,6 +580,7 @@ def var_forward_lag_selection(df, model, max_lags, target_col, n_folds, H, model
         H (int): Forecast horizon.
         model_params (dict): Parameters for the model.
         metrics (list): List of metrics to evaluate the model.
+        step_size (int, optional): Step size for lag selection. Defaults to None
         verbose (bool, optional): Whether to print progress. Defaults to False.
     Returns:
         dict: Dictionary of best lags for each variable.
@@ -596,9 +604,11 @@ def var_forward_lag_selection(df, model, max_lags, target_col, n_folds, H, model
                     current_lag = {a:b for a, b in best_lags.items()}
                     current_lag[k] = best_lags[k] + [x]
                     current_lag[k].sort()
-                    lag_model = model(**model_params, lag_dict = current_lag)
-                    my_cv = lag_model.cv_var(df, target_col, n_folds, H, metrics)
-                    scores = my_cv["score"].tolist()
+                    model.n_lag = current_lag
+                    my_cv = bidirectional_cross_validate(model=model, df=df, cv_split=n_folds,
+                                                         test_size=H, metrics=metrics, step_size=step_size)
+
+                    scores = my_cv[target_col].tolist()
                     if scores<best_score:
                         best_score = scores
                         best_lag = x
@@ -623,7 +633,7 @@ def var_forward_lag_selection(df, model, max_lags, target_col, n_folds, H, model
 
     return best_lags
 
-def var_backward_lag_selection(df, model, max_lags, min_lags, n_folds,target_col, H, model_params, metrics, forward_back=False, verbose = False):
+def var_backward_lag_selection(df, model, max_lags, min_lags, n_folds,target_col, H, metrics, step_size=None, forward_back=False, verbose = False):
     """
     Performs backward lag selection for Vektor Autoregressive models.
     Args:
@@ -642,8 +652,7 @@ def var_backward_lag_selection(df, model, max_lags, min_lags, n_folds,target_col
         dict: Dictionary of best lags for each variable.
     """
 
-    max_lag = sum(x for x in max_lags.values())
-    min_lag =min_lags   
+    max_lag = sum(x for x in max_lags.values()) 
     
     orj_lags = {i:list(range(1, max_lags[i]+1)) for i in max_lags}
     # lags = list(range(1, max_lags+1))
@@ -652,32 +661,34 @@ def var_backward_lag_selection(df, model, max_lags, min_lags, n_folds,target_col
     
     best_score = list(np.repeat(float('inf'), len(metrics)))
     
-    worst_lags = {i:[] for i in max_lags}
-    while max_lag >= min_lag:
+    worst_lags = {i:[] for i in max_lags} # to store wost lags
+    while max_lag >= min_lags: 
         worst_lag=None
         worst_k = None
-        for k, lg in lags.items():
-            for r in lg:
+        for k, lg in lags.items(): # Iterate over each variable's lags
+            for r in lg: # try and test each lag
                 lags_to_test = {a:b for a, b in lags.items()}
-                lags_to_test[k] = [x for x in lg if x != r]
+                lags_to_test[k] = [x for x in lg if x != r] # Remove the current lag r
                 lags_to_test[k].sort()
-                lag_model = model(**model_params, lag_dict = lags_to_test)
-                my_cv = lag_model.cv_var(df, target_col, n_folds, H, metrics)
-                scores = my_cv["score"].tolist()
-                if scores<best_score:
+                model.n_lag = lags_to_test
+                my_cv = bidirectional_cross_validate(model=model, df=df, cv_split=n_folds,
+                                                     test_size=H, metrics=metrics, step_size=step_size)
+                scores = my_cv[target_col].tolist()
+                if scores < best_score:
                     best_score = scores
-                    worst_lag = r
-                    worst_k = k
-                    best_lags = lags_to_test
-        if worst_lag is not None:
+                    worst_lag = r # update the worst lag
+                    worst_k = k # update the worst variable whose lag was worst_lag
+                    best_lags = lags_to_test # update the best lags
+        if worst_lag is not None: # If a worst lag was found
             # lags.append(best_lag)
-            lags[worst_k].remove(worst_lag)
+            lags[worst_k].remove(worst_lag) # Remove the worst lag from the variable worst_k
             lags[worst_k].sort()
             # best_lags[worst_k].remove(worst_lag)
             worst_lags[worst_k].append(worst_lag)
             worst_lags[worst_k].sort()
             if verbose == True:
-                print("worst_lag: ", worst_k, worst_lag)
+                # print worst variable, lags and current score
+                print(f'Worst lag\'s variable: {worst_k} with lag {worst_lag}, current score: {best_score}')
             max_lag = sum(len(x) for x in lags.values())
                 
         else:
@@ -698,20 +709,24 @@ def var_backward_lag_selection(df, model, max_lags, min_lags, n_folds,target_col
                         current_lag = {a:b for a, b in best_lags.items()}
                         current_lag[k] = best_lags[k] + [x]
                         current_lag[k].sort()
-                        lag_model = model(**model_params, lag_dict = current_lag)
-                        my_cv = lag_model.cv_var(df, target_col, n_folds, H, metrics)
-                        scores = my_cv["score"].tolist()
-                        if scores<best_score:
+                        model.n_lag = current_lag
+                        my_cv = bidirectional_cross_validate(model=model, df=df, cv_split=n_folds,
+                                                             test_size=H, metrics=metrics, step_size=step_size)
+                        scores = my_cv[target_col].tolist()
+                        if scores < best_score:
                             best_score = scores
-                            best_lag = x
-                            best_k = k
-       
+                            best_lag = x # update the best lag
+                            best_k = k # update the best variable whose lag was best_lag
+
                 if best_lag is not None:
                     best_lags[best_k].append(best_lag)
                     worst_lags[best_k].remove(best_lag)
 
                     best_lags[best_k].sort()
                     len_worst = sum(len(x) for x in worst_lags.values()) #  update len worst
+                    if verbose == True:
+                # print worst variable, lags and current score
+                        print(f'Variable of best lag after backward: {best_k} with lag {best_lag}, current score: {best_score}')
                 else:
                     break
                     
@@ -1456,7 +1471,7 @@ def bidirectional_cross_validate(model, df, cv_split, test_size, metrics, step_s
         cv_fi = pd.concat([cv_fi, cv_tr_df1, cv_tr_df2], axis=0)
     overall = [[m.__name__, np.mean([v[0] for v in metrics_dict[m.__name__]])] for m in metrics]
     # pd.DataFrame(overall).rename(columns={0: "eval_metric", 1: "score1", 2: "score2"})
-    return pd.DataFrame(overall).rename(columns={0: "eval_metric", 1: f"score_{model.target_cols[0]}", 2: f"score_{model.target_cols[1]}"})
+    return pd.DataFrame(overall).rename(columns={0: "eval_metric", 1: model.target_cols[0], 2: model.target_cols[1]})
 
 def cv_tune(
     model,

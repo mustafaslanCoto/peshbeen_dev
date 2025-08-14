@@ -383,7 +383,7 @@ class VARModel:
         verbose: bool = False
     ):
         self.target_cols = target_cols
-        self.lags = lags
+        self.n_lag = lags
         self.lag_transform = lag_transform
         self.diffs = difference
         self.season_diffs = seasonal_diff
@@ -466,8 +466,8 @@ class VARModel:
                     dfc[w] = seasonal_diff(dfc[w], s)
 
             # Lag features
-            if self.lags is not None:
-                for a, lags in self.lags.items():
+            if self.n_lag is not None:
+                for a, lags in self.n_lag.items():
                     lag_used = lags if isinstance(lags, list) else range(1, lags + 1) # Ensure lags is a list, even if a single int
                     for lg in lag_used:
                         dfc[f"{a}_lag_{lg}"] = dfc[a].shift(lg)
@@ -568,10 +568,10 @@ class VARModel:
 
             # Lagged features
             lags = []
-            if self.lags is not None:
+            if self.n_lag is not None:
                 for tr, vals in y_lists.items():
                     if tr in self.lags:
-                        lag_used = self.lags[tr] if isinstance(self.lags[tr], list) else range(1, self.lags[tr] + 1)
+                        lag_used = self.n_lag[tr] if isinstance(self.n_lag[tr], list) else range(1, self.n_lag[tr] + 1)
                         ys = [vals[-x] for x in lag_used]
                         lags += ys
             # Lag transforms
