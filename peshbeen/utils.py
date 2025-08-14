@@ -13,6 +13,7 @@ from hyperopt import fmin, tpe, hp, Trials, STATUS_OK, space_eval
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 import matplotlib.pyplot as plt
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+from statistics import NormalDist
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -94,6 +95,145 @@ def plot_PACF_ACF(series, lag_num=40, figsize=(15, 8), pacf_method='ywm', alpha=
 
     fig.tight_layout()
     plt.show()
+
+def cross_autocorrelation(x, y, nlags, adjusted=True, alpha=None, bartlett_confint=False):
+    """
+    Compute the cross-autocorrelation between two time series.
+
+    Parameters
+    ----------
+    x : array_like
+        First time series.
+    y : array_like
+        Second time series.
+    nlags : int
+        Number of lags to compute.
+    adjusted : bool, optional
+        Whether to apply the adjustment factor (default is True).
+    alpha : float, optional
+        Significance level for confidence intervals (default is None).
+    bartlett_confint : bool, optional
+        Whether to use Bartlett's method for confidence intervals (default is False).
+
+    Returns
+    -------
+    cc : ndarray
+        Cross-autocorrelation values for each lag and confidence intervals if `alpha` is provided.
+    """
+    x = np.asarray(x)
+    y = np.asarray(y)
+    x_mean = np.mean(x)
+    y_mean = np.mean(y)
+    n = len(x)
+    if len(y) != n:
+        raise ValueError("x and y must have the same length")
+    
+    # Variance (autocovariance at lag 0)
+    var_x = np.sum((x - x_mean)**2)
+    var_y = np.sum((y - y_mean)**2)
+
+    # Autocovariance but make sure make adjusted, meaning applying 1/(n-k) or 1/n
+    cc = np.empty(nlags + 1)
+    for k in range(nlags + 1):
+        num = np.sum((y[:n-k] - y_mean) * (x[k:] - x_mean))
+        r = num / np.sqrt(var_x * var_y)
+        if adjusted and k > 0:
+            r *= n / (n - k)
+        cc[k] = r
+
+    # Confidence intervals (optional)
+    if alpha is not None:
+        z = NormalDist().inv_cdf(1 - alpha/2)
+        se = np.zeros_like(cc)
+        
+        if bartlett_confint:
+            # Bartlett approximation: SE_k = sqrt((1 + 2 * sum_{j=1}^{k-1} cc[j]^2) / n)
+            if nlags >= 1:
+                r_sq_cum = np.cumsum(cc[1:]**2)
+                prev_sum = np.concatenate(([0.0], r_sq_cum[:-1]))
+                se[1:] = np.sqrt((1.0 + 2.0 * prev_sum) / n)
+            se[0] = 0.0
+        else:
+            se[1:] = 1.0 / np.sqrt(n)
+            se[0] = 0.0
+
+        confint = np.column_stack((cc - z*se, cc + z*se))
+        return cc, confint
+    else:
+        return cc, None
+    
+    
+def cross_autocorrelation_plot(x, y, nlags, adjusted=True, alpha=0.05, figsize=(8, 5), title="Cross-Autocorrelation"):
+    """
+    Plot the cross-autocorrelation between two time series.
+
+    Parameters
+    ----------
+    x : array_like
+        First time series.
+    y : array_like
+        Second time series.
+    nlags : int
+        Number of lags to compute.
+    adjusted : bool, optional
+        Whether to apply the adjustment factor (default is True).
+    alpha : float, optional
+        Significance level for confidence intervals (default is 0.05).
+    figsize : tuple, optional
+        Figure size for the plot (default is (8, 5)).
+    title : str, optional
+        Title for the plot (default is "Cross-Autocorrelation").
+
+    Returns
+    -------
+    cc : ndarray
+        Cross-autocorrelation plot.
+    """
+    x = np.asarray(x)
+    y = np.asarray(y)
+    x_mean = np.mean(x)
+    y_mean = np.mean(y)
+    n = len(x)
+    if len(y) != n:
+        raise ValueError("x and y must have the same length")
+    
+    # Variance (autocovariance at lag 0)
+    var_x = np.sum((x - x_mean)**2)
+    var_y = np.sum((y - y_mean)**2)
+
+    # Autocovariance but make sure make adjusted, meaning applying 1/(n-k) or 1/n
+    cc = np.empty(nlags + 1)
+    for k in range(nlags + 1):
+        num = np.sum((y[:n-k] - y_mean) * (x[k:] - x_mean))
+        r = num / np.sqrt(var_x * var_y)
+        if adjusted and k > 0:
+            r *= n / (n - k)
+        cc[k] = r
+
+    # Confidence intervals (optional)
+    z = NormalDist().inv_cdf(1 - alpha/2)
+    if adjusted:
+        den = n-nlags
+    else:
+        den = n
+    bound = z / np.sqrt(den)
+    # Bar plot of cross-correlation
+    plt.figure(figsize=figsize)
+    plt.bar(np.arange(nlags + 1), cc, edgecolor='k', label='Cross-correlation')
+
+    z = NormalDist().inv_cdf(1 - alpha/2)
+    bound = z / np.sqrt(len(arr1) - nlags) if adjusted else z / np.sqrt(len(arr1))
+    lag_x = np.arange(nlags + 1)
+    plt.fill_between(lag_x, -bound, bound, color='gray', alpha=0.15, label='Confidence Interval')
+    plt.axhline(bound, color='black', linewidth=0.7, linestyle='--')
+    plt.axhline(-bound, color='black', linewidth=0.7, linestyle='--')
+    plt.xlabel("Lags of second time series")
+    plt.grid(axis='y')
+    plt.ylabel("Cross-correlation")
+    plt.title(title)
+    plt.legend()
+    plt.show()
+
 #------------------------------------------------------------------------------
 # Transformation Utility Functions
 #------------------------------------------------------------------------------
@@ -1181,6 +1321,8 @@ def tune_ets(data, param_space, cv_splits, horizon, eval_metric, eval_num, step_
     # Remove all keys with value None in a single step
     model_params = {k: v for k, v in model_params.items() if v is not None}
     fit_params = {k: v for k, v in fit_params.items() if v is not None}
+    fit_params = {k: v for k, v in fit_params.items()
+                  if not (k == "damping_trend" and model_params.get("damped_trend") is False)}
     return model_params, fit_params
 
 #------------------------------------------------------------------------------
