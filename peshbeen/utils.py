@@ -461,7 +461,8 @@ def forward_lag_selection(df, max_lags, n_folds, H, model, metrics,
                 lags.remove(best_lag)
                 best_lags.sort()
                 if verbose == True:
-                    print(len(best_lags))
+            # print worst variable, lags and current score
+                    print(f'best lag: {best_lag} with score: {best_score}')
             else:
                 break
         if best_lag is None:
@@ -521,7 +522,8 @@ def backward_lag_selection(df, max_lags,min_lags, n_folds, H, model, metrics, st
             lags.sort()
             best_lags.sort()
             if verbose == True:
-                print(len(best_lags))
+        # print worst variable, lags and current score
+                print(f'worst lag: {worst_lag} with score: {best_score}')
         else:
             break
     
@@ -550,7 +552,8 @@ def backward_lag_selection(df, max_lags,min_lags, n_folds, H, model, metrics, st
                     best_lags.append(best_lag)
                     worst_lags.remove(best_lag)
                     if verbose == True:
-                        print(len(best_lags))
+                # print worst variable, lags and current score
+                        print(f'best lag after backward: {best_lag} with score: {best_score}')
                     best_lags.sort()
                     # if verbose = True:
                     #     print(best_lags)
@@ -619,7 +622,8 @@ def var_forward_lag_selection(df, model, max_lags, target_col, n_folds, H, metri
                 best_lags[best_target].sort()
                 max_lag = sum(len(x) for x in lags.values())
                 if verbose == True:
-                    print("Best lag: ", best_target, best_lag)
+            # print worst variable, lags and current score
+                    print(f'Variable of best lag after backward: {best_target} with lag {best_lag}, current score: {best_score}')
             else:
                 break
         lags = {i:[item for item in orj_lags[i] if item not in best_lags[i]] for i in max_lags.keys()}
