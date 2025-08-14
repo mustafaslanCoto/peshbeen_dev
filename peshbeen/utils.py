@@ -1374,7 +1374,7 @@ def tune_sarima(y, d, D, season,p_range, q_range, P_range, Q_range, X=None):
 # ML tuning utility function
 #------------------------------------------------------------------------------
 
-def cross_validate(self, model, df, cv_split, test_size, metrics, step_size=None):
+def cross_validate(model, df, cv_split, test_size, metrics, step_size=None):
     """
     Run cross-validation using time series splits.
 
@@ -1389,7 +1389,7 @@ def cross_validate(self, model, df, cv_split, test_size, metrics, step_size=None
         pd.DataFrame: Performance metrics for CV.
     """
     tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
-    self.metrics_dict = {m.__name__: [] for m in metrics}
+    metrics_dict = {m.__name__: [] for m in metrics}
     for train_index, test_index in tscv.split(df):
         train, test = df.iloc[train_index], df.iloc[test_index]
         x_test = test.drop(columns=[model.target_col])
@@ -1399,15 +1399,15 @@ def cross_validate(self, model, df, cv_split, test_size, metrics, step_size=None
         # Evaluate each metric
         for m in metrics:
             if m.__name__ == "MASE":
-                eval_val = m(y_test, bb_forecast, train[self.target_col])
+                eval_val = m(y_test, bb_forecast, train[model.target_col])
             else:
                 eval_val = m(y_test, bb_forecast)
-            self.metrics_dict[m.__name__].append(eval_val)
-    overall_performance = [[m.__name__, np.mean(self.metrics_dict[m.__name__])] for m in metrics]
+            metrics_dict[m.__name__].append(eval_val)
+    overall_performance = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
     return pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
 
 
-def bidirectional_cross_validate(self, model, df, cv_split, test_size, metrics, step_size=None):
+def bidirectional_cross_validate(model, df, cv_split, test_size, metrics, step_size=None):
     """
     Cross-validate the bidirectional CatBoost model with time series split.
     Args:
@@ -1419,9 +1419,9 @@ def bidirectional_cross_validate(self, model, df, cv_split, test_size, metrics, 
         pd.DataFrame: CV performance metrics for each target variable.
     """
     tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
-    self.metrics_dict = {m.__name__: [] for m in metrics}
-    self.cv_fi = pd.DataFrame()
-    self.cv_forecasts_df = pd.DataFrame()
+    metrics_dict = {m.__name__: [] for m in metrics}
+    cv_fi = pd.DataFrame()
+    cv_forecasts_df = pd.DataFrame()
     for i, (train_index, test_index) in enumerate(tscv.split(df)):
         train, test = df.iloc[train_index], df.iloc[test_index]
         x_test = test.drop(columns=model.target_cols)
@@ -1431,32 +1431,32 @@ def bidirectional_cross_validate(self, model, df, cv_split, test_size, metrics, 
         model.fit(train)
 
         forecast_vals1, forecast_vals2 = model.forecast(test_size, x_test=x_test)
-        forecat_df = test[self.target_cols]
+        forecat_df = test[model.target_cols]
         forecat_df["forecasts1"] = forecast_vals1
         forecat_df["forecasts2"] = forecast_vals2
-        self.cv_forecasts_df = pd.concat([self.cv_forecasts_df, forecat_df], axis=0)
+        cv_forecasts_df = pd.concat([cv_forecasts_df, forecat_df], axis=0)
         for m in metrics:
             if m.__name__ == "MASE":
-                val1 = m(y_test1, forecast_vals1, train[self.target_cols[0]])
-                val2 = m(y_test2, forecast_vals2, train[self.target_cols[1]])
+                val1 = m(y_test1, forecast_vals1, train[model.target_cols[0]])
+                val2 = m(y_test2, forecast_vals2, train[model.target_cols[1]])
             else:
                 val1 = m(y_test1, forecast_vals1)
                 val2 = m(y_test2, forecast_vals2)
 
-            self.metrics_dict[m.__name__].append([val1, val2])
+            metrics_dict[m.__name__].append([val1, val2])
 
-        cv_tr_df1 = pd.DataFrame({"feat_name": self.model1_fit.feature_names_in_,
-                                "importance": self.model1_fit.feature_importances_}).sort_values(by="importance", ascending=False)
-        cv_tr_df1["target"] = self.target_cols[0]
+        cv_tr_df1 = pd.DataFrame({"feat_name": model.model1_fit.feature_names_in_,
+                                "importance": model.model1_fit.feature_importances_}).sort_values(by="importance", ascending=False)
+        cv_tr_df1["target"] = model.target_cols[0]
         cv_tr_df1["fold"] = i
-        cv_tr_df2 = pd.DataFrame({"feat_name": self.model2_fit.feature_names_in_,
-                                "importance": self.model2_fit.feature_importances_}).sort_values(by="importance", ascending=False)
-        cv_tr_df2["target"] = self.target_cols[1]
+        cv_tr_df2 = pd.DataFrame({"feat_name": model.model2_fit.feature_names_in_,
+                                "importance": model.model2_fit.feature_importances_}).sort_values(by="importance", ascending=False)
+        cv_tr_df2["target"] = model.target_cols[1]
         cv_tr_df2["fold"] = i
-        self.cv_fi = pd.concat([self.cv_fi, cv_tr_df1, cv_tr_df2], axis=0)
-    overall = [[m.__name__, np.mean([v[0] for v in self.metrics_dict[m.__name__]])] for m in metrics]
+        cv_fi = pd.concat([cv_fi, cv_tr_df1, cv_tr_df2], axis=0)
+    overall = [[m.__name__, np.mean([v[0] for v in metrics_dict[m.__name__]])] for m in metrics]
     # pd.DataFrame(overall).rename(columns={0: "eval_metric", 1: "score1", 2: "score2"})
-    return pd.DataFrame(overall).rename(columns={0: "eval_metric", 1: f"score_{self.target_cols[0]}", 2: f"score_{self.target_cols[1]}"})
+    return pd.DataFrame(overall).rename(columns={0: "eval_metric", 1: f"score_{model.target_cols[0]}", 2: f"score_{model.target_cols[1]}"})
 
 def cv_tune(
     model,
