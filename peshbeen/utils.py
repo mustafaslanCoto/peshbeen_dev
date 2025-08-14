@@ -222,7 +222,7 @@ def cross_autocorrelation_plot(x, y, nlags, adjusted=True, alpha=0.05, figsize=(
     plt.bar(np.arange(nlags + 1), cc, edgecolor='k', label='Cross-correlation')
 
     z = NormalDist().inv_cdf(1 - alpha/2)
-    bound = z / np.sqrt(len(arr1) - nlags) if adjusted else z / np.sqrt(len(arr1))
+    bound = z / np.sqrt(n - nlags) if adjusted else z / np.sqrt(n)
     lag_x = np.arange(nlags + 1)
     plt.fill_between(lag_x, -bound, bound, color='gray', alpha=0.15, label='Confidence Interval')
     plt.axhline(bound, color='black', linewidth=0.7, linestyle='--')
