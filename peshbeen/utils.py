@@ -1485,6 +1485,7 @@ def cv_tune(
     test_size,
     param_space,
     eval_metric,
+    lag_space=None,
     step_size=None,
     opt_horizon=None,
     eval_num=100,
@@ -1541,21 +1542,6 @@ def cv_tune(
         if "box_cox_biasadj" in params:
             model.biasadj = params["box_cox_biasadj"]
 
-        # Handle ETS trend settings
-        # if model.trend:
-        #     if model.trend_type in ["ses", "feature_ses"]:
-        #         model.ets_model = {
-        #             k: params[k] for k in ["trend", "damped_trend", "seasonal", "seasonal_periods"] if k in params
-        #         }
-        #         model.ets_fit = {}
-        #         for k in ["smoothing_level", "smoothing_trend", "smoothing_seasonal", "damping_trend"]:
-        #             if k in params:
-        #                 # Only set "damping_trend" if "damped_trend" is True
-        #                 if (k == "damping_trend") and ("damped_trend" in params and not params["damped_trend"]):
-        #                     continue
-        #                 else:
-        #                     model.ets_fit[k] = params[k]
-
     def _get_model_params_for_fit(params):
         # Exclude special parameters that should not be passed to the model constructor
         skip_keys = {
@@ -1564,7 +1550,16 @@ def cv_tune(
             "smoothing_level", "smoothing_trend", "smoothing_seasonal", "damping_trend",
             "differencing_number"
         }
+        if lag_space is not None:
+            skip_keys.update([f"lag_{i}" for i in range(1, lag_space+1)])
+
         return {k: v for k, v in params.items() if k not in skip_keys}
+    
+    if lag_space is not None:
+        lag_postions = {f"lag_{i}": hp.choice(f"lag_{i}", [0, 1]) for i in range(1, lag_space + 1)}
+        search_space = {**lag_postions, **param_space}
+    else:
+        search_space = {**param_space}
 
     def objective(params):
         _set_model_params(params)
@@ -1574,6 +1569,14 @@ def cv_tune(
         else:
             # For other models, get the parameters to set
             model_params = _get_model_params_for_fit(params)
+
+        if lag_space is not None:
+            selected_lags = [i for i in range(1, 61) if params[f"lag_{i}"] == 1]
+            model.n_lag = selected_lags
+
+                # Optional: penalize too few lags
+        if len(selected_lags) < 1:
+            return {"loss": 1e6, "status": STATUS_OK}
 
         metrics = []
         for train_index, test_index in tscv.split(df):
@@ -1607,7 +1610,7 @@ def cv_tune(
     trials = Trials()
     best_hyperparams = fmin(
         fn=objective,
-        space=param_space,
+        space=search_space,
         algo=tpe.suggest,
         max_evals=eval_num,
         trials=trials,
@@ -1618,7 +1621,14 @@ def cv_tune(
         for t in trials.trials
     ]
 
-    return space_eval(param_space, best_hyperparams)
+    # Extract and sort lag values
+    if lag_space is not None:
+        best_lag_indexes = [value for key, value in sorted(((k, v) for k, v in best_hyperparams.items() if k.startswith("lag_")),
+                                                          key=lambda x: int(x[0].split("_")[1]))]
+        best_lag_values = [i for i in range(1, lag_space + 1) if best_lag_indexes[i-1]==1]
+        return space_eval(param_space, best_hyperparams), best_lag_values
+    else:
+        return space_eval(param_space, best_hyperparams)
 
 #------------------------------------------------------------------------------
 # Regression Detrending and Forecasting
