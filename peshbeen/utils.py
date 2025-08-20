@@ -1070,7 +1070,26 @@ def seasonal_diff(data, seasonal_period):
     return np.array(orig_data)
 
 # invert difference
+# def invert_seasonal_diff(orig_data, diff_data, seasonal_period):
+#     """
+#     Inverts seasonal differencing.
+
+#     Args:
+#         orig (list): The original series values.
+#         diff (array-like): The differenced series.
+#         seasonal_period (int): The seasonal period.
+        
+#     Returns:
+#         array-like: Reconstructed series.
+#     """
+#     conc_data = list(orig_data[-seasonal_period:]) + list(diff_data)
+#     for i in range(len(conc_data)-seasonal_period):
+#         conc_data[i+seasonal_period] = conc_data[i]+conc_data[i+seasonal_period]
+
+#     return np.array(conc_data[-len(diff_data):])
+
 def invert_seasonal_diff(orig_data, diff_data, seasonal_period):
+
     """
     Inverts seasonal differencing.
 
@@ -1082,11 +1101,14 @@ def invert_seasonal_diff(orig_data, diff_data, seasonal_period):
     Returns:
         array-like: Reconstructed series.
     """
-    conc_data = list(orig_data[-seasonal_period:]) + list(diff_data)
-    for i in range(len(conc_data)-seasonal_period):
-        conc_data[i+seasonal_period] = conc_data[i]+conc_data[i+seasonal_period]
-
-    return np.array(conc_data[-len(diff_data):])
+    # Start with the last seasonal_period original values
+    result = list(orig_data[-seasonal_period:])
+    for i in range(len(diff_data)):
+        # Each new value is previous season value + diff
+        val = diff_data[i] + result[i]
+        result.append(val)
+    # Only return the reconstructed values matching diff_data length
+    return np.array(result[seasonal_period:])
 
 #------------------------------------------------------------------------------
 # Croston's Method metrics

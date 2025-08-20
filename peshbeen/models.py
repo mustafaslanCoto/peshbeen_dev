@@ -50,7 +50,6 @@ class ml_forecaster:
         box_cox_biasadj (bool, optional): If True, adjust bias after Box–Cox inversion. Default is False.
         lag_transform (list, optional): List specifying additional lag transformations.
     """
-    # possit test
     def __init__(self, model, target_col, cat_variables=None, target_encode=False, n_lag=None, difference=None, seasonal_diff=None,
                  trend=None, ets_params=None, box_cox=False, box_cox_lmda=None,
                  box_cox_biasadj=False, lag_transform=None):
