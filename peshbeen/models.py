@@ -50,13 +50,13 @@ class ml_forecaster:
         box_cox_biasadj (bool, optional): If True, adjust bias after Box–Cox inversion. Default is False.
         lag_transform (list, optional): List specifying additional lag transformations.
     """
+    # possit test
     def __init__(self, model, target_col, cat_variables=None, target_encode=False, n_lag=None, difference=None, seasonal_diff=None,
                  trend=None, ets_params=None, box_cox=False, box_cox_lmda=None,
                  box_cox_biasadj=False, lag_transform=None):
         # Validate that either n_lag or lag_transform is provided
         if n_lag is None and lag_transform is None:
             raise ValueError("You must supply either n_lag or lag_transform parameters")
-            
         self.target_col = target_col
         self.cat_variables = cat_variables
         self.target_encode = target_encode  # whether to use target encoding for categorical variables
