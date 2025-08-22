@@ -54,9 +54,7 @@ class ml_forecaster:
     def __init__(self, model, target_col, cat_variables=None, target_encode=False, n_lag=None, difference=None, seasonal_diff=None,
                  trend=None, ets_params=None, box_cox=False, box_cox_lmda=None,
                  box_cox_biasadj=False, lag_transform=None):
-        # Validate that either n_lag or lag_transform is provided
-        if n_lag is None and lag_transform is None:
-            raise ValueError("You must supply either n_lag or lag_transform parameters")
+
         self.target_col = target_col
         self.cat_variables = cat_variables
         self.target_encode = target_encode  # whether to use target encoding for categorical variables
@@ -714,8 +712,6 @@ class ml_bidirect_forecaster:
     def __init__(self, model, target_cols, cat_variables=None, n_lag=None, difference=None, seasonal_length=None,
                  trend=None,ets_params=None, target_encode=False,
                  box_cox=None, box_cox_lmda=None, box_cox_biasadj=None, lag_transform=None):
-        if n_lag is None and lag_transform is None:
-            raise ValueError('Expected either n_lag or lag_transform args')
         self.model = model
         self.target_cols = target_cols
         self.cat_variables = cat_variables
