@@ -12,6 +12,7 @@ from sklearn.base import clone
 from tabnanny import verbose
 import numpy as np
 import pandas as pd
+import copy
 import statsmodels.api as sm
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
@@ -207,6 +208,8 @@ class ml_forecaster:
         else:
             self.model_fit = model_.fit(self.X, self.y)
 
+    def copy(self):
+        return copy.deepcopy(self)
 
     def forecast(self, n_ahead, x_test=None):
         """
@@ -526,6 +529,9 @@ class VARModel:
         """
         arr = np.array(X)
         return np.dot(self.coeffs.T, arr.T)
+
+    def copy(self):
+        return copy.deepcopy(self)
 
     def forecast(self, H: int, exog: Optional[pd.DataFrame] = None) -> Dict[str, np.ndarray]:
         """
@@ -938,7 +944,9 @@ class ml_bidirect_forecaster:
             self.model1_fit = model1_.fit(self.X, self.y1)
             self.model2_fit = model2_.fit(self.X, self.y2)
 
-        
+    def copy(self):
+        return copy.deepcopy(self)
+
     def forecast(self, n_ahead, x_test=None):
         """
         Forecast future values for n_ahead periods.
