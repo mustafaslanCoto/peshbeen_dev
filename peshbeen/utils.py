@@ -300,6 +300,10 @@ class rolling_mean:
         else:
             # If not a forecast, apply the usual shift
             return pd.Series(data).shift(self.shift).rolling(self.window_size, min_periods=self.min_samples).mean()
+        
+    def get_name(self):
+        return f"rolling_mean_{self.window_size}_{self.shift}"
+
 
 class rolling_quantile:
     """
@@ -324,6 +328,8 @@ class rolling_quantile:
         else:
             # If not a forecast, apply the usual shift
             return pd.Series(data).shift(self.shift).rolling(self.window_size, min_periods=self.min_samples).quantile(self.quantile)
+    def get_name(self):
+        return f"rolling_quantile_{self.window_size}_{self.quantile}_{self.shift}"
     
 class rolling_std:
     """
@@ -345,6 +351,8 @@ class rolling_std:
             return pd.Series(data).shift(self.shift-1).rolling(self.window_size, min_periods=self.min_samples).std()
         else:
             return pd.Series(data).shift(self.shift).rolling(self.window_size, min_periods=self.min_samples).std()
+    def get_name(self):
+        return f"rolling_std_{self.window_size}_{self.shift}"   
 
 class expanding_std:
     """
@@ -359,6 +367,8 @@ class expanding_std:
             return pd.Series(data).shift(self.shift-1).expanding().std()
         else:
             return pd.Series(data).shift(self.shift).expanding().std()
+    def get_name(self):
+        return f"expanding_std_{self.shift}"
 
 class expanding_mean:
     """
@@ -373,6 +383,8 @@ class expanding_mean:
             return pd.Series(data).shift(self.shift-1).expanding().mean()
         else:
             return pd.Series(data).shift(self.shift).expanding().mean()
+    def get_name(self):
+        return f"expanding_mean_{self.shift}"
 
 class expanding_quantile:
     """
@@ -392,6 +404,8 @@ class expanding_quantile:
             return pd.Series(data).shift(self.shift-1).expanding().quantile(self.quantile)
         else:
             return pd.Series(data).shift(self.shift).expanding().quantile(self.quantile)
+    def get_name(self):
+        return f"expanding_quantile_{self.quantile}_{self.shift}"   
         
 class expanding_ets:
     """
@@ -413,6 +427,9 @@ class expanding_ets:
         fitted_aligned = pd.Series(np.nan, index=data.index) # Align the index with the original data to avoid misalignment
         fitted_aligned.iloc[self.shift:] = fitted.values
         return fitted_aligned
+    
+    def get_name(self):
+        return f"expanding_ets_{self.shift}"
 
 #------------------------------------------------------------------------------
 # Lag Selection Algorithms
