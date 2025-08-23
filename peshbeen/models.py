@@ -21,15 +21,22 @@ from hyperopt import fmin, tpe, hp, Trials, STATUS_OK, space_eval
 from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
 from sklearn.ensemble import RandomForestRegressor, AdaBoostRegressor, HistGradientBoostingRegressor
-from peshbeen.utils import (box_cox_transform, back_box_cox_transform, undiff_ts, seasonal_diff,
+from peshbeen.transformations import (box_cox_transform, back_box_cox_transform, undiff_ts, seasonal_diff,
                         invert_seasonal_diff, kfold_target_encoder, target_encoder_for_test,
                         rolling_quantile, rolling_mean, rolling_std,
-                        expanding_mean, expanding_std, expanding_quantile, ParametricTimeSeriesSplit)
+                        expanding_mean, expanding_std, expanding_quantile)
+from peshbeen.model_selection import ParametricTimeSeriesSplit
 from catboost import CatBoostRegressor
 from cubist import Cubist
 # dot not show warnings
 import warnings
 warnings.filterwarnings("ignore")
+import copy
+import statsmodels.api as sm
+from scipy.stats import norm, multivariate_normal
+from sklearn.linear_model import LinearRegression
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from scipy.special import logsumexp
 
 
 class ml_forecaster:
@@ -1083,4 +1090,1029 @@ class ml_bidirect_forecaster:
             self.target_cols[1]: forecasts2
         }
         return forecasts
+
+# Hidden Markov Model with Regression
+class MsHmmRegression:
+    """
+    Hidden Markov Model Regression for time series with EM parameter estimation.
+
+    Args:
+        n_components (int): Number of hidden states.
+        target_col (str): Name of the target variable.
+        lag_list (list): List of integer lags to include as features.
+        method (str): 'posterior' for soft state assignment, 'viterbi' for hard paths.
+        startprob_prior (float): Prior for initial state probabilities.
+        transmat_prior (float): Prior for transition matrix.
+        ets_params (tuple, optional): A tuple (model_params, fit_params) for exponential smoothing. Ex.g. ({'trend': 'add', 'seasonal': 'add'}, {'damped_trend': True}). If trend is "ets", this will be used.
+        add_constant (bool): Whether to add constant to regressors.
+        difference (int or None): Order of differencing to apply to target.
+        trend (str or None): Type of trend to remove ('linear', 'ets', etc.). Default is None.
+        cat_variables (list or None): List of categorical columns.
+        n_iter (int): Maximum number of EM iterations.
+        tol (float): Convergence tolerance for EM.
+        coefficients (np.ndarray or None): Initial regression coefficients.
+        stds (np.ndarray or None): Initial state std deviations.
+        init_state (np.ndarray or None): Initial state distribution.
+        trans_matrix (np.ndarray or None): Initial transition matrix.
+        random_state (int or None): Random seed.
+        verbose (bool): Print progress if True.
+    """
+
+    def __init__(self, n_components, target_col, lags, method="posterior",
+                 startprob_prior=1e3, transmat_prior=1e5, add_constant=True,
+                 difference=None, trend=None, ets_params = None, cat_variables=None, lag_transform=None, n_iter=100, tol=1e-6,
+                 coefficients=None, stds=None, init_state=None, trans_matrix=None,
+                 box_cox=False, lamda=None, box_cox_biasadj=False, season_diff=None,
+                 random_state=None, verbose=False):
+        self.N = n_components
+        self.target_col = target_col
+        self.diff = difference
+        self.cons = add_constant
+        self.cat_variables = cat_variables
+        # lags must be a list of integers or an integer
+        if not isinstance(lags, (int, list)):
+            raise ValueError("Lags must be an integer or a list of integers.")
+
+        self.lags = [i for i in range(1, lags + 1)] if isinstance(lags, int) else lags
+        self.method = method
+        self.box_cox = box_cox
+        self.lamda = lamda
+        self.biasadj = box_cox_biasadj
+        self.trend = trend
+        if ets_params is not None:
+            self.ets_model = ets_params[0]
+            self.ets_fit = ets_params[1]
+        else:
+            self.ets_model = None
+            self.ets_fit = None
+        self.season_diff = season_diff
+        self.lag_transform = lag_transform
+        self.iter = n_iter
+        self.tol = tol
+        self.verb = verbose
+
+
+        # RNG for reproducibility
+        self.rng = np.random.default_rng(random_state)
+        if init_state is None:
+            self.sp = startprob_prior
+            self.alpha_p = np.repeat(self.sp, self.N)
+            self.pi = self.rng.dirichlet(self.alpha_p) # Initial state probabilities using Dirichlet distribution
+        else:
+            self.pi = np.array(init_state)
+        if trans_matrix is None:
+            self.tm = transmat_prior
+            self.alpha_t = np.repeat(self.tm, self.N) # 
+            self.A = self.rng.dirichlet(self.alpha_t, size=self.N)
+        else:
+            self.A = np.array(trans_matrix)
+
+        self.coeffs = coefficients
+        self.stds = stds
+
+
+    def data_prep(self, df):
+        """
+        Prepare the data: encode categoricals, add lags, trend, differencing.
+        """
+        dfc = df.copy()
+        # Categorical variable encoding
+        if self.cat_variables is not None:
+            # if self.target_encode ==True:
+            #     for col in self.cat_variables:
+            #         encode_col = col+"_target_encoded"
+            #         dfc[encode_col] = kfold_target_encoder(dfc, col, self.target_col, 36)
+            #     self.df_encode = dfc.copy()
+            #     dfc = dfc.drop(columns = self.cat_variables)
+            #     # If target encoding is not used, convert categories to dummies    
+
+            # else:
+            for col, cat in self.cat_var.items():
+                dfc[col] = dfc[col].astype('category')
+                # Set categories for categorical columns
+                dfc[col] = dfc[col].cat.set_categories(cat)
+            dfc = pd.get_dummies(dfc, dtype=np.float64)
+
+            for i in self.drop_categ:
+                dfc.drop(list(dfc.filter(regex=i)), axis=1, inplace=True)
+        
+        if self.target_col in dfc.columns:
+            # Apply Box–Cox transformation if specified
+            if self.box_cox:
+                self.is_zero = np.any(np.array(dfc[self.target_col]) < 1) # check for zero or negative values
+                trans_data, self.lamda = box_cox_transform(x=dfc[self.target_col],
+                                                        shift=self.is_zero,
+                                                        box_cox_lmda=self.lamda)
+                dfc[self.target_col] = trans_data
+
+            if self.trend is not None:
+                self.len = len(dfc)
+                self.target_orig = dfc[self.target_col] # Store original values for later use during forecasting
+                if self.trend == "linear":
+                    self.lr_model = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), dfc[self.target_col])
+                    dfc[self.target_col] = dfc[self.target_col] - self.lr_model.predict(np.arange(self.len).reshape(-1, 1))
+                if self.trend == "ets":
+                    self.ets_model_fit = ExponentialSmoothing(dfc[self.target_col], **self.ets_model).fit(**self.ets_fit)
+                    dfc[self.target_col] = dfc[self.target_col] - self.ets_model_fit.fittedvalues.values
+
+            # Apply differencing if specified
+            if self.diff is not None or self.season_diff is not None:
+                self.orig = dfc[self.target_col].tolist()
+                if self.diff is not None:
+                    dfc[self.target_col] = np.diff(dfc[self.target_col], n=self.diff,
+                                                prepend=np.repeat(np.nan, self.diff))
+                if self.season_diff is not None:
+                    self.orig_d = dfc[self.target_col].tolist()
+                    dfc[self.target_col] = seasonal_diff(dfc[self.target_col], self.season_diff)
+
+            # Create lag features based on lags parameter
+            if self.lags is not None:
+                for lag in self.lags:
+                    dfc[f"{self.target_col}_lag_{lag}"] = dfc[self.target_col].shift(lag)
+            # Create additional lag transformations if specified
+            if self.lag_transform is not None:
+                for func in self.lag_transform:
+                    if isinstance(func, (expanding_std, expanding_mean)):
+                        dfc[f"{func.__class__.__name__}_shift_{func.shift}"] = func(dfc[self.target_col])
+                    elif isinstance(func, expanding_quantile):
+                        dfc[f"{func.__class__.__name__}_shift_{func.shift}_q{func.quantile}"] = func(dfc[self.target_col])
+                    elif isinstance(func, rolling_quantile):
+                        dfc[f"{func.__class__.__name__}_{func.window_size}_shift_{func.shift}_q{func.quantile}"] = func(dfc[self.target_col])
+                    else:
+                        dfc[f"{func.__class__.__name__}_{func.window_size}_shift_{func.shift}"] = func(dfc[self.target_col])
+                        
+            self.df = dfc.dropna()
+            self.X = self.df.drop(columns=self.target_col)
+            self.y = self.df[self.target_col]
+            if self.cons:
+                self.X = sm.add_constant(self.X)
+            self.col_names = self.X.columns.tolist() if hasattr(self.X, 'columns') else [f"x{i}" for i in range(self.X.shape[1])]
+            self.X = np.array(self.X)
+            self.y = np.array(self.y)
+            self.T = len(self.y)
+            if self.coeffs is None or self.stds is None:
+                # Initial fit: use unweighted least squares for all states
+                coeffs = []
+                stds = []
+                for i in range(self.N):
+                    # Least squares fit
+                    coeff_i = np.linalg.lstsq(self.X, self.y, rcond=None)[0]
+                    coeffs.append(coeff_i)
+                    y_pred = self.X @ coeff_i
+                    resid = self.y - y_pred
+                    var_i = np.mean(resid ** 2)
+                    stds.append(np.sqrt(var_i))
+                self.coeffs = np.row_stack(coeffs)
+                self.stds = np.array(stds)
+
+        else:
+            return dfc.dropna()
+
+
+    def compute_coeffs(self, ridge=1e-5, var_floor=1e-5, w_floor=1e-5):
+
+        # Update regression coefficients and stds for each state
+
+        # If posterior probabilities are shorter than the number of observations, make self.X and self.y same length visa vis make posterier same as self.X and self.y length
+        if self.posterior.shape[1] < self.X.shape[0]:
+            # Truncate self.X and self.y to match the length of self.posterior[i]
+            self.X = self.X[:self.posterior.shape[1]]
+            self.y = self.y[:self.posterior.shape[1]]
+        if self.posterior.shape[1] > self.X.shape[0]:
+            # Truncate self.posterior to match the length of self.X and self.y
+            self.posterior = self.posterior[:, -self.X.shape[0]:]
+
+        coeffs = []
+        stds = []
+        X = self.X
+        for s in range(self.N):
+            # Add floor so state isn’t “killed”
+            w = self.posterior[s] + w_floor
+            w /= w.sum()
+            sw = np.sqrt(w)
+            Xw = X * sw[:, None]
+            yw = self.y * sw
+            XtX = Xw.T @ Xw + ridge*np.eye(X.shape[1])
+            Xty = Xw.T @ yw
+            beta_s = np.linalg.lstsq(XtX, Xty, rcond=None)[0]
+            coeffs.append(beta_s)
+            resid = self.y - X @ beta_s
+            var_s = (w * resid**2).sum() / max((w.sum()-beta_s.shape[0]), 1.0)
+            stds.append(np.sqrt(max(var_s, var_floor)))
+        self.coeffs = np.row_stack(coeffs)
+        self.stds = np.array(stds)
+
+
+# Hidden Markov Model with Vector Autoregressive (VAR)
+
+    def _log_emissions(self):
+        # logB[s,t] = log p(y_t | state s)
+        N, T = self.N, self.T
+        logB = np.empty((N, T))
+        self.fitted = np.empty((N, T))
+        # self.compute_coeffs()
+        for s in range(N):
+            mu = self.X @ self.coeffs[s]           # (T,)
+            self.fitted[s, :] = mu
+            logB[s, :] = norm.logpdf(self.y, loc=mu, scale=self.stds[s])
+        return logB
+
+    def _e_step_log(self):
+        N, T = self.N, self.T
+        logA  = np.log(self.A + 1e-300)
+        logpi = np.log(self.pi + 1e-300)
+        logB  = self._log_emissions()
+
+        # Forward
+        log_alpha = np.empty((N, T))
+        log_alpha[:, 0] = logpi + logB[:, 0]
+        for t in range(1, T):
+            # log_alpha[:,t] = logB[:,t] + logsumexp_i( log_alpha[i,t-1] + logA[i,:] )
+            log_alpha[:, t] = logB[:, t] + logsumexp(log_alpha[:, t-1][:, None] + logA, axis=0)
+
+        # Log-likelihood
+        loglik = logsumexp(log_alpha[:, -1])
+
+        # Backward
+        log_beta = np.full((N, T), 0.0)
+        for t in range(T-2, -1, -1):
+            # log_beta[:,t] = logsumexp_j( logA + logB[:,t+1] + log_beta[:,t+1] , axis=1 )
+            log_beta[:, t] = logsumexp(logA + (logB[:, t+1] + log_beta[:, t+1])[None, :], axis=1)
+
+        # Gamma
+        log_gamma = log_alpha + log_beta - loglik
+        # normalize per time to kill rounding; columns sum to 1 after exp
+        log_gamma -= logsumexp(log_gamma, axis=0)
+        gamma = np.exp(log_gamma)
+
+        # Xi
+        log_xi = np.empty((N, N, T-1))
+        for t in range(T-1):
+            tmp = log_alpha[:, t][:, None] + logA + (logB[:, t+1] + log_beta[:, t+1])[None, :]
+            tmp -= logsumexp(tmp)      # normalize this slice
+            log_xi[:, :, t] = tmp
+        xi = np.exp(log_xi)
+
+        # print("logB min/max:", np.min(logB), np.max(logB))
+        # print("Any NaN in logB?", np.any(np.isnan(logB)))
+        # print("Any Inf in logB?", np.any(np.isinf(logB)))
+        # sanity checks (soft)
+        assert np.allclose(gamma.sum(axis=0), 1.0, atol=1e-8)
+        assert np.allclose(xi.sum(axis=(0,1)), 1.0, atol=1e-8)
+
+        self.log_forward  = log_alpha
+        self.log_backward = log_beta
+        self.posterior    = gamma
+        self.loglik       = loglik
+        return loglik, gamma, xi
+
+
+    def _m_step(self, gamma, xi):
+        numer = xi.sum(axis=2)                         # (N,N)
+        denom = gamma[:, :-1].sum(axis=1, keepdims=True)  # (N,1)
+        A = numer / (denom + 1e-12)
+        A = np.maximum(A, 1e-12)
+        A /= A.sum(axis=1, keepdims=True)
+        self.A = A
+        self.compute_coeffs() 
+
+
+    def EM(self):
+        loglik, gamma, xi = self._e_step_log()
+        self._m_step(gamma, xi)
+        self.LL = loglik
+        # return loglik
+        
+    def fit_em(self, df_train):
+        """
+        Run EM iterations until convergence (log-domain version).
+        """
+
+        # Handle categorical variable encoding
+        if self.cat_variables is not None:
+            self.cat_var = {c: sorted(df_train[c].drop_duplicates().tolist(), key=lambda x: str(x))
+                            for c in self.cat_variables}
+            self.drop_categ = [sorted(df_train[col].drop_duplicates().tolist(), key=lambda x: str(x))[0]
+                               for col in self.cat_variables]
+        self.data_prep(df_train)
+
+        prev_ll = -np.inf
+        # store intermediate log-likelihoods
+        self.log_likelihoods = []
+        for it in range(self.iter):
+            # loglik, gamma, xi = self._e_step_log()
+            # self._m_step(gamma, xi)
+            self.EM()
+            if self.verb:
+                print(f"Iter {it}: loglik={self.LL:.4f}")
+            if it > 10:
+                if abs(self.LL - prev_ll) < self.tol:
+                    if self.verb:
+                        print("Converged.")
+                    break
+            self.log_likelihoods.append(self.LL)
+            prev_ll = self.LL
+        return self.LL
+
+    def fit(self, df_train):
+        """
+        Refit the HMM regression model on new training data (log-domain version).
+        """
+        self.data_prep(df_train)
+        self.EM()
+
+        # N, T = self.N, self.T
+        # logpi = np.log(self.pi + 1e-300)
+        # logA = np.log(self.A + 1e-300)
+        # logB = self._log_emissions()
+        # log_alpha = np.zeros((N, T))
+
+        # # Initialization
+        # for i in range(N):
+        #     log_alpha[i, 0] = logpi[i] + logB[i, 0]
+
+        # # Recursion
+        # for t in range(1, T):
+        #     for j in range(N):
+        #         log_alpha[j, t] = logB[j, t] + logsumexp(log_alpha[:, t-1] + logA[:, j])
+
+        # # Sequence log-likelihood
+        # self.LL = logsumexp(log_alpha[:, -1])
+        # self.log_alpha = log_alpha
+        return self.LL
     
+    def predict_states(self):
+        return np.argmax(self.posterior, axis=0)
+    def predict_proba(self):
+        return self.posterior
+    
+    # AIC computation    
+    @property
+    def AIC(self):
+        k = self.N * self.X.shape[1] + self.N ** 2 + self.N - 1
+        return 2 * k - 2 * self.LL
+
+    @property
+    def BIC(self):
+        
+        k = self.N * self.X.shape[1] + self.N ** 2 + self.N - 1
+        
+        n = self.T  # effective number of observations
+        return -2 * self.LL + k * np.log(n)
+
+    def copy(self):
+        return copy.deepcopy(self)
+
+    def forecast(self, H, exog=None):
+        """
+        Forecast H periods ahead using fitted HMM regression (log-domain version), with advanced post-processing.
+
+        Handles:
+        - Trend re-adjustment (linear/ETS)
+        - Seasonal differencing reversal
+        - Regular differencing reversal
+        - Box-Cox back-transform
+        - Exogenous variables
+        - Lag transformations
+        """
+        y_list = self.y.tolist()
+        forecasts_ = []
+        N = self.N
+
+        # Prepare exogenous future regressors if provided
+        if exog is not None:
+            if self.cons:
+                if exog.shape[0] == 1:
+                    exog.insert(0, 'const', 1)
+                else:
+                    exog = sm.add_constant(exog)
+            exog = np.array(self.data_prep(exog))
+
+        # Prepare for trend adjustment
+        # This assumes you stored original target (pre-trend removal) in self.target_orig
+        if hasattr(self, 'target_orig') and self.trend is not None:
+            orig_targets = self.target_orig.tolist()  # Used to re-add trend during forecasting
+
+        # Init with last forward distribution (in log)
+        log_forward_last = self.log_forward[:, -1]
+        log_forward_last -= logsumexp(log_forward_last)
+        logA = np.log(self.A + 1e-300)
+
+        for t in range(H):
+            if exog is not None:
+                exo_inp = exog[t].tolist()
+            else:
+                exo_inp = [1] if self.cons else []
+            lags = [y_list[-l] for l in self.lags]
+            transform_lag = []
+            if self.lag_transform is not None:
+                series_array = np.array(y_list)
+                for func in self.lag_transform:
+                    transform_lag.append(func(series_array, is_forecast=True).to_numpy()[-1])
+            inp = np.array(exo_inp + lags + transform_lag)
+
+            log_f_t = np.zeros(N) # log probabilities for each state at time t
+            state_preds = np.zeros(N)
+            for j in range(N):
+                mu = np.dot(self.coeffs[j], inp)
+                state_preds[j] = mu
+                log_f_t[j] = logsumexp(log_forward_last + logA[:, j])
+
+            # normalize to probabilities
+            log_f_t -= logsumexp(log_f_t)
+            f_t = np.exp(log_f_t)
+            pred_w = np.sum(f_t * state_preds)
+            forecasts_.append(pred_w)
+            y_list.append(pred_w)
+
+            # --- Trend re-adjustment ---
+            if self.trend is not None:
+                if self.trend == "linear":
+                    # Fit a linear trend on original targets
+                    trend_fit = LinearRegression().fit(
+                        np.arange(len(orig_targets)).reshape(-1, 1),
+                        np.array(orig_targets)
+                    )
+                    trend_forecast = trend_fit.predict(np.array([[len(orig_targets)]]))[0]
+                elif self.trend == "ets":
+                    # Fit an ETS model and forecast next point
+                    trend_fit = ExponentialSmoothing(
+                        np.array(orig_targets),
+                        **self.ets_model
+                    ).fit(**self.ets_fit)
+                    trend_forecast = trend_fit.forecast(1)[0]
+                else:
+                    trend_forecast = 0.0  # fallback
+
+                orig_forecast = pred_w + trend_forecast
+                forecasts_[-1] = orig_forecast    # overwrite with trend-adjusted value
+                orig_targets.append(orig_forecast)  # update for next lag/trend step
+
+            log_forward_last = log_f_t.copy()
+
+        forecasts = np.array(forecasts_)
+
+        # --- Revert seasonal differencing if applied ---
+        if self.season_diff is not None:
+            forecasts = invert_seasonal_diff(self.orig_d, forecasts, self.season_diff)
+
+        # --- Revert regular differencing if applied ---
+        if self.diff is not None:
+            forecasts = undiff_ts(self.orig, forecasts, self.diff)
+
+        # --- Box-Cox back-transform if applied ---
+        if self.box_cox:
+            forecasts = back_box_cox_transform(
+                y_pred=forecasts, lmda=self.lamda,
+                shift=self.is_zero, box_cox_biasadj=self.biasadj
+            )
+
+        return forecasts
+
+# Hidden Markov Model with Vector Autoregressive (VAR)
+
+class MsHmmVar:
+    """
+    Hidden Markov Model with Vector Autoregressive (VAR) emission distributions.
+
+    This model can be used for time series with multiple targets, capturing regime-switching dynamics
+    using multivariate Gaussian emissions whose means depend on lagged values (VAR).
+
+    Args:
+        n_components (int): Number of hidden states.
+        target_col (list of str): List of target variable names.
+        lags (dict): Dict mapping target column to list of lag values.
+        difference (dict): Dict mapping target column to integer difference order.
+        seasonal_diff (dict): Dict mapping target column to seasonal difference order.
+        lag_transform (dict): Dict mapping target column to lag transformation order.
+        trend (dict): Dict mapping target column to trend removal method.
+        ets_params : Optional[Dict[str, tuple]] (default=None)
+        Dictionary specifying params for ExponentialSmoothing per variable.
+        For example, {'target1': ({'trend': 'add', 'seasonal': 'add'}, {'damped_trend': True}), 'target2': ({'trend': 'add', 'seasonal': 'add'}, {'damped_trend': True})}.
+        method (str): 'posterior' for soft state assignment, 'viterbi' for hard paths.
+        covariance_type (str): 'full' (default) or 'diag' for emission covariances. default is "diag".
+        startprob_prior, transmat_prior: Dirichlet prior values.
+        add_constant (bool): Whether to add constant/intercept to regressors.
+        cat_variables (list): List of categorical columns to encode.
+        n_iter (int): Maximum EM iterations.
+        tol (float): Convergence tolerance.
+        coefficients (list of np.ndarray): Initial state-wise VAR coefficient matrices.
+        init_state (np.ndarray): Initial state probabilities.
+        trans_matrix (np.ndarray): Initial transition matrix.
+        random_state (int): Seed.
+        verbose (bool): Print progress if True.
+    """
+    def __init__(self, n_components, target_col, lags, difference=None, method="posterior", covariance_type="full",
+                 startprob_prior=1e3, transmat_prior=1e5, add_constant=True, cat_variables=None, lag_transform=None, seasonal_diff=None, trend=None, ets_params = None,
+                 n_iter=100, tol=1e-6, coefficients=None, init_state=None, trans_matrix=None, box_cox=None, lamda=None, box_cox_biasadj=False,
+                 random_state=None, verbose=False):
+
+        self.N = n_components
+        self.target_col = target_col
+        self.diffs = difference
+        self.season_diff = seasonal_diff
+        self.cons = add_constant
+        # make sure lags is a dict mapping target columns to lists of lags even the lag is integer
+        if not isinstance(lags, dict):
+            raise ValueError("Lags must be a dictionary mapping target columns to lists of lags or a single integer.")
+        self.lags = {col: lags[col] if isinstance(lags[col], list) else list(range(1, lags[col] + 1)) for col in lags}
+        self.cat_variables = cat_variables
+        self.lag_transform = lag_transform
+        self.method = method
+        self.iter = n_iter
+        self.tol = tol
+        self.verb = verbose
+        self.cvr = covariance_type
+        self.coeffs = coefficients
+        self.box_cox = box_cox
+        if lamda is None:
+            self.lamda = {col: None for col in self.target_col}
+        else:
+            # must be dictionary mapping target columns to Box-Cox lambda values
+            if not isinstance(lamda, dict):
+                raise ValueError("Lambda must be a dictionary mapping target columns to Box-Cox lambda values.")
+            self.lamda = lamda
+        if box_cox_biasadj == False:
+            self.biasadj = {col: False for col in self.target_col}
+        else:
+            # must be dictionary mapping target columns to boolean values
+            if not isinstance(box_cox_biasadj, dict):
+                raise ValueError("Box-Cox bias adjustment must be a dictionary mapping target columns to boolean values.")
+            self.biasadj = box_cox_biasadj
+
+        # Handle trend default types
+        self.trend = trend
+        if self.trend is not None:
+            if not isinstance(self.trend, dict):
+                raise TypeError("trend must be a dictionary of target values")
+        self.ets_params = ets_params
+        # Initialization of state, transition, coefficients and covariances
+        self.rng = np.random.default_rng(random_state)
+        if init_state is None:
+            self.alpha_p = np.repeat(startprob_prior, self.N)
+            self.pi = self.rng.dirichlet(self.alpha_p)
+        else:
+            self.pi = np.array(init_state)
+
+        if trans_matrix is None:
+            self.alpha_t = np.repeat(transmat_prior, self.N)
+            self.A = self.rng.dirichlet(self.alpha_t, size=self.N)
+        else:
+            self.A = np.array(trans_matrix)
+
+    # -----------------------------
+    # Data preparation
+    # -----------------------------
+    def data_prep(self, df):
+        """
+        Prepare data: encode categoricals, handle differencing, add lags.
+        Returns DataFrame with targets and features.
+        """
+        dfc = df.copy()
+        if self.cat_variables is not None:
+            for col, cat in self.cat_var.items():
+                dfc[col] = pd.Categorical(dfc[col], categories=cat)
+            dfc = pd.get_dummies(dfc, dtype=np.float64)
+            for i in self.drop_categ:
+                dfc.drop(list(dfc.filter(regex=i)), axis=1, inplace=True)
+        if all(elem in dfc.columns for elem in self.target_col):
+
+            # Apply Box–Cox transformation if specified
+            if self.box_cox is not None:
+                self.is_zero = {col: np.any(np.array(dfc[col]) < 1) for col in self.box_cox}  # check for zero or negative values
+                for col in self.box_cox:
+                    if self.box_cox[col]:
+                        self.is_zero[col] = np.any(np.array(dfc[col]) < 1)  # check for zero or negative values
+                        trans_data, self.lamda[col] = box_cox_transform(x=dfc[col],
+                                                                shift=self.is_zero[col],
+                                                                box_cox_lmda=self.lamda[col])
+                        dfc[col] = trans_data
+
+
+            if self.trend is not None:
+                self.len = df.shape[0]
+                self.orig_targets = {i: dfc[i] for i in self.trend.keys()}  # Store original values for later use during forecasting
+                for k, v in self.trend.items():
+                    if v == "linear":
+                        model_fit = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), self.orig_targets[k])
+                        dfc[k] = dfc[k] - model_fit.predict(np.arange(self.len).reshape(-1, 1))
+                    elif v == "ets": # ets
+                        model_fit = ExponentialSmoothing(self.orig_targets[k], **self.ets_params[k][0]).fit(**self.ets_params[k][1])
+                        dfc[k] = dfc[k] - model_fit.fittedvalues.values
+                    else:
+                        raise ValueError(f"Unknown trend type: {v}")
+
+            # Apply differencing if specified
+            if self.diffs is not None:
+                # Save original values for inverse-differencing later for forecasting
+                self.origs = {}
+                for col in self.diffs.keys():
+                    if self.diffs[col] is not None:
+                        self.origs[col] = dfc[col].tolist()
+                        dfc[col] = np.diff(dfc[col], n=self.diffs[col],
+                                                    prepend=np.repeat(np.nan, self.diffs[col]))
+            # Apply seasonal differencing if specified
+            if self.season_diff is not None:
+                # Save original values for inverse-differencing later for forecasting
+                self.orig_d = {}
+                for col in self.season_diff.keys():
+                    if self.season_diff[col] is not None:
+                        self.orig_d[col] = dfc[col].tolist()
+                        dfc[col] = seasonal_diff(dfc[col], self.season_diff[col])
+
+            # Add lags for each target
+            if self.lags is not None:
+                for col, lags in self.lags.items():
+                    for lag in lags:
+                        dfc[f"{col}_lag_{lag}"] = dfc[col].shift(lag)
+            # Add lag transformations if specified
+            if self.lag_transform is not None:
+                for idx, (target, funcs) in enumerate(self.lag_transform.items()):
+                    for func in funcs:
+                        if isinstance(func, (expanding_std, expanding_mean)):
+                            dfc[f"trg{idx}_{func.__class__.__name__}_shift_{func.shift}"] = func(dfc[target])
+                        elif isinstance(func, expanding_quantile):
+                            dfc[f"trg{idx}_{func.__class__.__name__}_shift_{func.shift}_q{func.quantile}"] = func(dfc[target])
+                        elif isinstance(func, rolling_quantile):
+                            dfc[f"trg{idx}_{func.__class__.__name__}_{func.window_size}_shift_{func.shift}_q{func.quantile}"] = func(dfc[target])
+                        else:
+                            dfc[f"trg{idx}_{func.__class__.__name__}_{func.window_size}_shift_{func.shift}"] = func(dfc[target])
+
+            self.df = dfc.dropna()
+            self.X = self.df.drop(columns=self.target_col)
+            self.y = self.df[self.target_col]
+            if self.cons:
+                self.X = sm.add_constant(self.X)
+            self.col_names = self.X.columns.tolist() if hasattr(self.X, 'columns') else [f"x{i}" for i in range(self.X.shape[1])]
+            self.X = np.array(self.X)
+            self.y = np.array(self.y)
+            self.T = len(self.y)
+
+            # Init coeffs/stds if None
+            if self.coeffs is None:
+                coeffs, covs = [], []
+                for _ in range(self.N):
+                    beta = np.linalg.lstsq(self.X, self.y, rcond=None)[0]
+                    coeffs.append(beta)
+                    resid = self.y - self.X @ beta
+                    eff_df = len(resid) - self.X.shape[1]
+                    eff_df = max(eff_df, 1)
+                    cov_i = (resid.T @ resid) / eff_df
+                    covs.append(cov_i)
+                self.coeffs = np.stack(coeffs, axis=0)
+                self.covs = np.array(covs)
+
+        else:
+            return dfc.dropna()
+
+    # -----------------------------
+    # Emissions
+    # -----------------------------
+    def _log_emissions(self):
+        N, T = self.N, self.T
+        logB = np.empty((N, T))
+        self.fitted = np.empty((N, T, self.y.shape[1]))   # (N, T, m)
+        for s in range(N):
+            mus = self.X @ self.coeffs[s]
+            self.fitted[s, :, :] = mus
+            for t in range(T):
+                logB[s, t] = multivariate_normal(mean=mus[t], cov=self.covs[s]).logpdf(self.y[t])
+        return logB
+    
+    # -----------------------------
+    # E-step: perform expectation step: forward and backward and posterior update
+    # -----------------------------
+
+    def _e_step_log(self):
+        N, T = self.N, self.T
+        logA  = np.log(self.A + 1e-300)
+        logpi = np.log(self.pi + 1e-300)
+        logB  = self._log_emissions()
+
+        # Forward
+        log_alpha = np.empty((N, T))
+        log_alpha[:, 0] = logpi + logB[:, 0]
+        for t in range(1, T):
+            # log_alpha[:,t] = logB[:,t] + logsumexp_i( log_alpha[i,t-1] + logA[i,:] )
+            log_alpha[:, t] = logB[:, t] + logsumexp(log_alpha[:, t-1][:, None] + logA, axis=0)
+
+        # Log-likelihood
+        loglik = logsumexp(log_alpha[:, -1])
+
+        # Backward
+        log_beta = np.full((N, T), 0.0)
+        for t in range(T-2, -1, -1):
+            # log_beta[:,t] = logsumexp_j( logA + logB[:,t+1] + log_beta[:,t+1] , axis=1 )
+            log_beta[:, t] = logsumexp(logA + (logB[:, t+1] + log_beta[:, t+1])[None, :], axis=1)
+
+        # Gamma
+        log_gamma = log_alpha + log_beta - loglik
+        # normalize per time to kill rounding; columns sum to 1 after exp
+        log_gamma -= logsumexp(log_gamma, axis=0)
+        gamma = np.exp(log_gamma)
+
+        # Xi
+        log_xi = np.empty((N, N, T-1))
+        for t in range(T-1):
+            tmp = log_alpha[:, t][:, None] + logA + (logB[:, t+1] + log_beta[:, t+1])[None, :]
+            tmp -= logsumexp(tmp)      # normalize this slice
+            log_xi[:, :, t] = tmp
+        xi = np.exp(log_xi)
+
+        # print("logB min/max:", np.min(logB), np.max(logB))
+        # print("Any NaN in logB?", np.any(np.isnan(logB)))
+        # print("Any Inf in logB?", np.any(np.isinf(logB)))
+        # sanity checks (soft)
+        assert np.allclose(gamma.sum(axis=0), 1.0, atol=1e-8)
+        assert np.allclose(xi.sum(axis=(0,1)), 1.0, atol=1e-8)
+
+        self.log_forward  = log_alpha
+        self.log_backward = log_beta
+        self.posterior    = gamma
+        self.loglik       = loglik
+        return loglik, gamma, xi
+    
+    # -----------------------------
+    # M-step: perform expectation step: forward and backward and posterior update
+    # -----------------------------
+
+    def _m_step(self, gamma, xi):
+        numer = xi.sum(axis=2)                         # (N,N)
+        denom = gamma[:, :-1].sum(axis=1, keepdims=True)  # (N,1)
+        A = numer / (denom + 1e-12)
+        A = np.maximum(A, 1e-12)
+        A /= A.sum(axis=1, keepdims=True)
+        self.A = A
+        self.compute_coeffs() 
+
+
+    def EM(self):
+        loglik, gamma, xi = self._e_step_log()
+        self._m_step(gamma, xi)
+        self.LL = loglik
+        # return loglik
+    
+    # -----------------------------
+    # perform iterations using EM
+    # -----------------------------
+        
+    def fit_em(self, df_train):
+        """
+        Run EM iterations until convergence (log-domain version).
+        """
+
+        # Handle categorical variable encoding
+        if self.cat_variables is not None:
+            self.cat_var = {c: sorted(df_train[c].drop_duplicates().tolist(), key=lambda x: str(x))
+                            for c in self.cat_variables}
+            self.drop_categ = [sorted(df_train[col].drop_duplicates().tolist(), key=lambda x: str(x))[0]
+                               for col in self.cat_variables]
+        self.data_prep(df_train)
+
+        prev_ll = -np.inf
+        # store intermediate log-likelihoods
+        self.log_likelihoods = []
+        for it in range(self.iter):
+            # loglik, gamma, xi = self._e_step_log()
+            # self._m_step(gamma, xi)
+            self.EM()
+            if self.verb:
+                print(f"Iter {it}: loglik={self.LL:.4f}")
+            if it > 10:
+                if abs(self.LL - prev_ll) < self.tol:
+                    if self.verb:
+                        print("Converged.")
+                    break
+            self.log_likelihoods.append(self.LL)
+            prev_ll = self.LL
+        # self.LL = self.LL
+        return self.LL
+
+    # -----------------------------
+    # Compute coefficients and covariances
+    # -----------------------------
+
+    def compute_coeffs(self, ridge=1e-5, var_floor=1e-5, w_floor=1e-6):
+
+        # Update regression coefficients and stds for each state
+
+        # If posterior probabilities are shorter than the number of observations, make self.X and self.y same length visa vis make posterier same as self.X and self.y length
+        if self.posterior.shape[1] < self.X.shape[0]:
+            # Truncate self.X and self.y to match the length of self.posterior[i]
+            self.X = self.X[:self.posterior.shape[1]]
+            self.y = self.y[:self.posterior.shape[1]]
+        if self.posterior.shape[1] > self.X.shape[0]:
+            # Truncate self.posterior to match the length of self.X and self.y
+            self.posterior = self.posterior[:, -self.X.shape[0]:]
+
+        covs, coeffs = [], []
+        X, y = self.X, self.y
+        for s in range(self.N):
+            w = self.posterior[s] + w_floor
+            w /= w.sum()
+            sw = np.sqrt(w)
+            self.sw = sw
+            Xw = X * sw[:, None]
+            yw = y * sw[:, None]  # <-- THIS IS THE FIX
+            XtX = Xw.T @ Xw + ridge * np.eye(X.shape[1])
+            Xty = Xw.T @ yw
+            beta_s = np.linalg.lstsq(XtX, Xty, rcond=None)[0]
+            coeffs.append(beta_s)
+            resid = y - X @ beta_s
+            eff_df = np.sum(w) - X.shape[1]
+            eff_df = max(eff_df, 1)
+            cov_i = (w[:, None] * resid).T @ resid / eff_df
+            # Regularize covariance matrix
+            # cov_i += var_floor * np.eye(cov_i.shape[0])
+            eigvals, eigvecs = np.linalg.eigh(cov_i)
+            eigvals = np.clip(eigvals, var_floor, None)
+            cov_i = eigvecs @ np.diag(eigvals) @ eigvecs.T
+
+            covs.append(cov_i)
+            # var_s = (w * resid**2).sum() / max(w.sum(), 1.0)
+        self.coeffs = np.stack(coeffs)
+        if self.cvr == "full":
+            self.covs = covs
+        elif self.cvr == "diag":
+            self.covs = [np.diag(np.diag(cov_i)) for cov_i in covs]
+
+    # -----------------------------
+    # Fit model with learned parameters
+    # -----------------------------
+
+    def fit(self, df_train):
+        """
+        Refit the HMM-VAR model on new training data (log-domain version).
+        """
+        self.data_prep(df_train)
+        # N, T = self.N, self.T
+        # logpi = np.log(self.pi + 1e-300)
+        # logA = np.log(self.A + 1e-300)
+        # log_alpha = np.zeros((N, T))
+        # logB  = self._log_emissions()
+
+        # # Initialization
+        # for i in range(N):
+        #     log_alpha[i, 0] = logpi[i] + logB[i, 0]
+
+        # # Recursion
+
+        # for t in range(1, T):
+        #     for j in range(N):
+        #         log_alpha[j, t] = logB[j, t] + logsumexp(log_alpha[:, t-1] + logA[:, j])
+
+        # # Sequence log-likelihood
+        # self.LL = logsumexp(log_alpha[:, -1])
+        # self.log_forward = log_alpha
+        self.EM()
+        return self.LL
+
+    def predict_states(self):
+        return np.argmax(self.posterior, axis=0)
+    def predict_proba(self):
+        return self.posterior
+
+    # AIC computation    
+    @property
+    def AIC(self):
+        d = self.y.shape[1]     # number of dependent variables
+        r = self.X.shape[1]     # number of predictors (lags + exogenous, intercept included)
+        
+        # Parameters per regime (state):
+        # regression coefficients + covariance parameters
+        per_regime = r * d + d * (d + 1) / 2  
+        
+        # Total parameters:
+        # - regime-specific: N * per_regime
+        # - transition matrix: N*(N-1)
+        # - initial distribution: (N-1)
+        n_params = self.N * per_regime + self.N * (self.N - 1) + (self.N - 1)
+        
+        return 2 * n_params - 2 * self.LL
+    
+    @property
+    def BIC(self):
+        d = self.y.shape[1]  # number of dependent variables
+        r = self.X.shape[1]  # number of predictors (lags + exogenous, intercept included)
+        
+        per_regime = r * d + d * (d + 1) / 2  # regression + covariance per state
+        k = self.N * per_regime + self.N*(self.N-1) + (self.N-1)  # total params
+        
+        n = self.T  # effective number of observations
+        return -2 * self.LL + k * np.log(n)
+    
+    def copy(self):
+        return copy.deepcopy(self)
+    
+    # -----------------------------
+    # Forecasting
+    # -----------------------------
+    def forecast(self, H, exog=None):
+        """
+        Forecast H periods ahead using fitted HMM-VAR model (log-domain version).
+        Includes trend adjustment, differencing reversal, seasonal differencing,
+        and Box-Cox back-transform.
+        """
+        if exog is not None:
+            if self.cons:
+                if exog.shape[0] == 1:
+                    exog.insert(0, 'const', 1)
+                else:
+                    exog = sm.add_constant(exog)
+            exog = np.array(self.data_prep(exog))
+        y_dict = {col: self.y[:, i].tolist() for i, col in enumerate(self.target_col)}
+        forecasts = {col: [] for col in self.target_col}
+
+        # Init with last forward distribution (in log)
+        log_forward_last = self.log_forward[:, -1]
+        log_forward_last -= logsumexp(log_forward_last)   # normalize
+        logA = np.log(self.A + 1e-300)
+
+        # Keep original targets if trend adjustments are needed
+        if self.trend is not None:
+            orig_targets = {col: self.orig_targets[col].tolist() for col in self.trend.keys()}
+
+        for t in range(H):
+            if exog is not None:
+                exo_inp = exog[t].tolist()
+            else:
+                exo_inp = [1] if self.cons else []
+
+            # Construct lag inputs
+            lags = []
+            for col in y_dict.keys():
+                ys = [y_dict[col][-x] for x in self.lags[col]]
+                lags.extend(ys)
+
+            # Lag transforms
+            transform_lag = []
+            if self.lag_transform is not None:
+                for target, funcs in self.lag_transform.items():
+                    series_array = np.array(y_dict[target])
+                    for func in funcs:
+                        transform_lag.append(func(series_array, is_forecast=True).to_numpy()[-1])
+
+            inp = np.array(exo_inp + lags + transform_lag)
+
+            log_f_t = np.zeros(self.N)
+            state_preds = {col: np.zeros(self.N) for col in self.target_col}
+
+            for j in range(self.N):
+                mus = inp @ self.coeffs[j]  # shape: (n_targets,)
+                for i, col in enumerate(self.target_col):
+                    state_preds[col][j] = mus[i]
+                log_f_t[j] = logsumexp(log_forward_last + logA[:, j])
+
+            # Normalize log-forward
+            log_f_t -= logsumexp(log_f_t)
+            f_t = np.exp(log_f_t)
+
+            # Weighted prediction per target
+            for col in self.target_col:
+                pred = np.sum(f_t * state_preds[col])
+
+                # --- Trend re-addition ---
+                if self.trend is not None and col in self.trend:
+                    if self.trend[col] == "linear":
+                        trend_fit = LinearRegression().fit(
+                            np.arange(self.len + t).reshape(-1, 1),
+                            np.array(orig_targets[col])
+                        )
+                        trend_forecast = trend_fit.predict(np.array([[self.len + t]]))[0]
+                    elif self.trend[col] == "ets":
+                        trend_fit = ExponentialSmoothing(
+                            np.array(orig_targets[col]),
+                            **self.ets_params[col][0]
+                        ).fit(**self.ets_params[col][1])
+                        trend_forecast = trend_fit.forecast(1)[0]
+                    orig_forecast = pred + trend_forecast
+                    forecasts[col].append(orig_forecast)
+                    orig_targets[col].append(orig_forecast)
+                    y_dict[col].append(pred)  # keep pred for lags
+                else:
+                    forecasts[col].append(pred)
+                    y_dict[col].append(pred)
+
+            log_forward_last = log_f_t.copy()
+
+        # --- Post-processing transforms ---
+        if self.season_diff is not None:
+            for col in self.season_diff.keys():
+                forecasts[col] = invert_seasonal_diff(self.orig_d[col], forecasts[col], self.season_diff[col])
+
+        if self.diffs is not None:
+            for col in self.diffs.keys():
+                forecasts[col] = undiff_ts(self.origs[col], forecasts[col], self.diffs[col])
+
+        if self.box_cox is not None:
+            for col in self.box_cox:
+                if self.box_cox[col]:
+                    forecasts[col] = back_box_cox_transform(
+                        y_pred=forecasts[col],
+                        lmda=self.lamda[col],
+                        shift=self.is_zero[col],
+                        box_cox_biasadj=self.biasadj[col]
+                    )
+
+        return forecasts
+

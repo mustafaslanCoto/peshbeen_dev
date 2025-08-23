@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 
-VERSION = '0.0.2' 
+VERSION = '0.0.3' 
 DESCRIPTION = 'Auto regressive bagging and boosting package'
 LONG_DESCRIPTION = 'Forecating using historical data as predictors'
 
