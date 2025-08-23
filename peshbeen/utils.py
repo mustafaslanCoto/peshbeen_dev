@@ -432,334 +432,492 @@ class expanding_ets:
         return f"expanding_ets_{self.shift}"
 
 #------------------------------------------------------------------------------
-# Lag Selection Algorithms
-#------------------------------------------------------------------------------
+# Feature Selection Algorithms
+# ------------------------------------------------------------------------------
 
-def forward_lag_selection(df, max_lags, n_folds, H, model, metrics,
-                          step_size = None, verbose = False):
+def forward_feature_selection(df, n_folds = None, H = None, model = None, metrics = None,
+                                  lags_to_consider = None, candidate_features = None, transformations = None, 
+                                    step_size = None, verbose = False):
     """
-    Performs forward lag selection for Regression models.
-    Args:
+    Performs forward lag/feature/transform selection for Regression models.
+    Parameters:
         df (pd.DataFrame): DataFrame containing the time series data.
-        max_lags (int): Maximum number of lags to consider.
-        n_folds (int): Number of folds for cross-validation.
-        H (int): Forecast horizon.
-        model: The forecasting model to be used.
-        model_params (dict): Parameters for the model.
-        metrics (list): List of metrics to evaluate the model.
-        step_size (int, optional): Step size for cross-validation. Defaults to None.
-        verbose (bool, optional): Whether to print progress. Defaults to False.
+        n_folds (int, optional): Number of cross-validation folds.
+        H (int, optional): Forecast horizon.
+        model: Model to be used for training and evaluation.
+        metrics (list, optional): List of metrics to evaluate the model.
+        lags_to_consider (list, optional): List of lags to consider for feature selection.
+        candidate_features (list, optional): List of candidate exogenous features.
+        transformations (list, optional): List of transformations to apply.
+        step_size (int, optional): Step size for rolling window.
+        verbose (bool, optional): Whether to print progress messages.
     Returns:
-        list: List of best lags selected.
+        dict: Dictionary of best features
     """
-    max_lag = max_lags
-    orj_lags = list(range(1, max_lags+1))
-    lags = list(range(1, max_lags+1))
-    best_lags = []
-    
-    best_score = list(np.repeat(float('inf'), len(metrics)))
-    
-    while max_lag>0:
-        for i in range(max_lag):
-            best_lag = None
-            for lg in lags:
-                current_lag = best_lags + [lg]
-                current_lag.sort()
-                model.n_lag = current_lag
-                # lag_model = model(**model_params, n_lag = current_lag)
-                my_cv = cross_validate(model=model, df=df, cv_split=n_folds,
-                                       test_size=H, metrics=metrics, step_size=step_size)
-                scores = my_cv["score"].tolist()
-                if scores<best_score:
-                    best_score = scores
-                    best_lag = lg 
-            if best_lag is not None:
-                best_lags.append(best_lag)
-                lags.remove(best_lag)
-                best_lags.sort()
-                if verbose == True:
-            # print worst variable, lags and current score
-                    print(f'best lag: {best_lag} with score: {best_score}')
-            else:
-                break
-        if best_lag is None:
-            break
-        lags = [item for item in orj_lags if item not in best_lags]
-        lags.sort()
-        if lags == orj_lags:
-            break
-        else:
-            orj_lags = [item for item in orj_lags if item not in best_lags]
-            orj_lags.sort()
-            max_lag = len(orj_lags)
-    return best_lags
 
-def backward_lag_selection(df, max_lags,min_lags, n_folds, H, model, metrics, step_size=None, forward_back=False, verbose = False):
+
+    if lags_to_consider is not None:
+        remaining_lags = list(range(1, lags_to_consider + 1))
+        model.n_lag = None # Start with no lags
+    if candidate_features is not None:
+        candidate_features = candidate_features.copy()
+        df = df.drop(columns=candidate_features)
+        df_orig = df.copy() # Keep original for feature add-back
+    if transformations is not None:
+        transformations = transformations.copy()
+        model.lag_transform = None # Start with no transformations
+    best_features = {"best_lags": [], "best_exogs": [], "best_transforms": []}
+    best_score = [float('inf')] * len(metrics)
+
+    while True:
+        improvement = False
+        candidate = {'type': None, 'name': None}
+        scores = best_score
+
+        # Test Lags
+        if lags_to_consider is not None:
+            for lag in remaining_lags:
+                current_lags = sorted(best_features["best_lags"] + [lag])
+                model_test = model.copy()
+                model_test.n_lag = current_lags
+                my_cv = cross_validate(model=model_test, df=df, cv_split=n_folds,
+                                       test_size=H, metrics=metrics, step_size=step_size)
+                score = my_cv["score"].tolist()
+                # print(f'testing lag: {lag} with score: {score}')
+                if score < scores:
+                    scores = score
+                    candidate = {'type': 'lag', 'name': lag}
+                    # print(candidate["type"], candidate["name"], score)
+                    improvement = True
+
+        # Test Exogenous Features
+        if candidate_features is not None:
+            for feat in candidate_features:
+                df_test = df.copy()
+                df_test[feat] = df_orig[feat]
+                model_test = model.copy()
+                my_cv = cross_validate(model=model_test, df=df_test, cv_split=n_folds,
+                                       test_size=H, metrics=metrics, step_size=step_size)
+                score = my_cv["score"].tolist()
+                if score < scores:
+                    scores = score
+                    candidate = {'type': 'exog', 'name': feat}
+                    improvement = True
+
+        # Test Transformations
+        if transformations is not None:
+            for trans in transformations:
+                model_test = model.copy()
+                lag_transform = (model_test.lag_transform or []) + [trans]
+                model_test.lag_transform = lag_transform
+                my_cv = cross_validate(model=model_test, df=df, cv_split=n_folds,
+                                       test_size=H, metrics=metrics, step_size=step_size)
+                score = my_cv["score"].tolist()
+                # print(f'testing transformation: {trans.get_name()} with score: {score}')
+                if score < scores:
+                    scores = score
+                    candidate = {'type': 'transform', 'name': trans}
+                    # print(candidate["type"], candidate["name"].get_name(), score)
+                    improvement = True
+
+        # Update best features
+        if improvement:
+            best_score = scores
+            if candidate['type'] == 'lag':
+                best_features["best_lags"].append(candidate['name'])
+                remaining_lags.remove(candidate['name'])
+            elif candidate['type'] == 'exog':
+                best_features["best_exogs"].append(candidate['name'])
+                candidate_features.remove(candidate['name'])
+                df[candidate['name']] = df_orig[candidate['name']]
+            elif candidate['type'] == 'transform':
+                best_features["best_transforms"].append(candidate['name'])
+                transformations.remove(candidate['name'])
+                if model.lag_transform is None:
+                    model.lag_transform = [candidate['name']]
+                else:
+                    model.lag_transform.append(candidate['name'])
+
+            if verbose:
+                if candidate['type'] == 'transform':
+                    print(f"Added {candidate['type']}: {candidate['name'].get_name()} with score: {best_score}")
+                else:
+                    print(f"Added {candidate['type']}: {candidate['name']} with score: {best_score}")
+        else:
+            break  # No improvement
+
+    if transformations is not None and best_features["best_transforms"]:
+        best_features["best_transforms"] = [trans.get_name() for trans in best_features["best_transforms"]]
+        
+    if lags_to_consider is not None and best_features["best_lags"]:
+        best_features["best_lags"].sort()
+
+    return best_features
+
+
+
+def backward_feature_selection(df, n_folds = None, H = None, model = None, metrics = None,
+                                  lags_to_consider = None, candidate_features = None, transformations = None, 
+                                    step_size = None, verbose = False):
     """
     Performs backward lag selection for Regression models.
-    Args:
+    Parameters:
         df (pd.DataFrame): DataFrame containing the time series data.
-        max_lags (int): Maximum number of lags to consider.
-        min_lags (int): Minimum number of lags to retain.
+        n_folds (int, optional): Number of cross-validation folds.
+        H (int, optional): Forecast horizon.
+        model: Model to be used for training and evaluation.
+        metrics (list, optional): List of metrics to evaluate the model.
+        lags_to_consider (list, optional): List of lags to consider for feature selection.
+        candidate_features (list, optional): List of candidate exogenous features.
+        transformations (list, optional): List of transformations to apply.
+        step_size (int, optional): Step size for rolling window.
+        verbose (bool, optional): Whether to print progress messages.
+    Returns:
+        dict: Dictionary of best features
+    """
+    remaining_lags = list(range(1, lags_to_consider + 1)) if lags_to_consider is not None else []
+    candidate_features = candidate_features.copy() if candidate_features is not None else []
+    transformations = transformations.copy() if transformations is not None else None
+    best_features = {"best_lags": remaining_lags, "best_exogs": candidate_features, "best_transforms": transformations}
+
+    ## setting the full model
+    # model_full = model.copy()
+    if lags_to_consider is not None:
+        model.n_lag = remaining_lags # Start with all lags to consider
+    if transformations is not None:
+        model.lag_transform = transformations # Start with all transformations
+
+    best_score = list(np.repeat(float('inf'), len(metrics)))
+
+    # best_lags = None
+    while True:
+        improvement = False
+        candidate = {'type': None, 'name': None}
+        scores = best_score
+        if best_features["best_lags"]:
+            for lg in best_features["best_lags"]:
+                lags_to_test = [x for x in best_features["best_lags"] if x != lg]
+                lags_to_test.sort()
+                model_test = model.copy()
+                model_test.n_lag = lags_to_test
+                my_cv = cross_validate(model=model_test, df=df, cv_split=n_folds,
+                                    test_size=H, metrics=metrics, step_size=step_size)
+                score = my_cv["score"].tolist()
+                # print(f"len of lags_to_test: {len(lags_to_test)} and score: {score}")
+                if score < scores:
+                    scores = score
+                    candidate = {'type': 'lag', 'name': lg}
+                    improvement = True
+        if best_features["best_transforms"]:
+            for trans in best_features["best_transforms"]:
+                trans_to_test = [x for x in best_features["best_transforms"] if x != trans]
+                model_test = model.copy()
+                model_test.lag_transform = trans_to_test
+                my_cv = cross_validate(model=model_test, df=df, cv_split=n_folds,
+                                    test_size=H, metrics=metrics, step_size=step_size)
+                score = my_cv["score"].tolist()
+                if score < scores:
+                    scores = score
+                    candidate = {'type': 'transform', 'name': trans}
+                    improvement = True
+        if best_features["best_exogs"]:
+            for feat in best_features["best_exogs"]:
+                # feat_to_test = [x for x in candidate_features if x != feat]
+                df_test = df.drop(columns=feat)
+                model_test = model.copy()
+                my_cv = cross_validate(model=model_test, df=df_test, cv_split=n_folds,
+                                    test_size=H, metrics=metrics, step_size=step_size)
+                score = my_cv["score"].tolist()
+                if score < scores:
+                    scores = score
+                    candidate = {'type': 'exog', 'name': feat}
+                    improvement = True
+
+        # Update best features
+        if improvement and candidate['type']:
+            best_score = scores
+            if candidate['type'] == 'lag':
+                best_features["best_lags"].remove(candidate['name'])
+            elif candidate['type'] == 'exog':
+                best_features["best_exogs"].remove(candidate['name'])
+                df = df.drop(columns=candidate['name'])
+            elif candidate['type'] == 'transform':
+                best_features["best_transforms"].remove(candidate['name'])
+                if not best_features["best_transforms"]:
+                    model.lag_transform = best_features["best_transforms"]
+                else:
+                    model.lag_transform = None
+
+            if verbose:
+                if candidate['type'] == 'transform':
+                    print(f"Removed {candidate['type']}: {candidate['name'].get_name()} with score: {best_score}")
+                else:
+                    print(f"Removed {candidate['type']}: {candidate['name']} with score: {best_score}")
+        else:
+            break  # No improvement
+
+    if transformations is not None and best_features["best_transforms"]:
+        best_features["best_transforms"] = [trans.get_name() for trans in best_features["best_transforms"]]
+    if lags_to_consider is not None and best_features["best_lags"]:
+        best_features["best_lags"].sort()
+    return best_features
+
+
+def var_forward_feature_selection(df, target_col, n_folds = None, H = None, model = None, metrics = None,
+                                  lags_to_consider = None, candidate_features = None, transformations = None, 
+                                    step_size = None, verbose = False):
+    """
+    Performs forward lag selection for Vektor Autoregressive models and bidirectional ml models
+    Parameters:
+        df (pd.DataFrame): DataFrame containing the time series data.
+        target_col (str): The target column for accuracy evaluation.
         n_folds (int): Number of folds for cross-validation.
         H (int): Forecast horizon.
+        model: The forecasting model to be used.
+        metrics (list): List of metrics to evaluate the model.
+        lags_to_consider (dict): Dictionary of maximum lags for each variable.
+        candidate_features (list): List of candidate exogenous features.
+        transformations (list): List of transformations to consider.
+        step_size (int, optional): Step size for lag selection. Defaults to None.
+        verbose (bool, optional): Whether to print progress. Defaults to False.
+    Returns:
+        dict: Dictionary of best features for each variable.
+    """
+
+    # max_lag = sum(x for x in max_lags.values())
+    
+    # lags = list(range(1, max_lags+1))
+
+    best_features = {"best_lags": {i: [] for i in lags_to_consider if lags_to_consider is not None}, "best_transforms": {i: [] for i in transformations if transformations is not None}, "best_exogs": []}
+    remaining_lags = {i:list(range(1, j+1)) for i, j in lags_to_consider.items()}
+    best_score = list(np.repeat(float('inf'), len(metrics)))
+
+    # Keep original for feature add-back
+    df_orig = df.copy()
+
+    # Drop candidate features initially
+    if candidate_features:
+        df = df.drop(columns=candidate_features) # Drop candidate features to start with feature selection
+    if transformations is not None:
+        model.lag_transform = None # Start with no transformations
+    if lags_to_consider is not None:
+        model.n_lag = None # Start with no lags
+
+    # while max_lag>0:
+    while True:
+        improvement = False
+        candidate = {'target': None, 'type': None, 'name': None}
+        scores = best_score
+        if lags_to_consider is not None:
+            for k, lg in remaining_lags.items():
+                for x in lg:
+                    model_test = model.copy()
+                    current_lag = {a:b for a, b in best_features['best_lags'].items()}
+                    current_lag[k] = best_features['best_lags'][k] + [x]
+                    current_lag[k].sort()
+                    model_test.n_lag = current_lag
+                    my_cv = bidirectional_cross_validate(model=model_test, df=df, cv_split=n_folds,
+                                                         test_size=H, metrics=metrics, step_size=step_size)
+
+                    score = my_cv[target_col].tolist()
+                    if score < scores:
+                        scores = score
+                        candidate = {'target': k, 'type': 'lag', 'name': x}
+                        improvement = True
+
+        # Test Exogenous Features
+        if candidate_features is not None:
+            for feat in candidate_features:
+                df_test = df.copy()
+                df_test[feat] = df_orig[feat]
+                model_test = model.copy()
+                my_cv = bidirectional_cross_validate(model=model_test, df=df_test, cv_split=n_folds, test_size=H,
+                                                     metrics=metrics, step_size=step_size)
+                score = my_cv[target_col].tolist()
+                if score < scores:
+                    scores = score
+                    candidate = {'target': None, 'type': 'exog', 'name': feat}
+                    improvement = True
+
+            # Test Transformations
+        if transformations is not None:
+            for k, trans in transformations.items():
+                for t in trans:
+                    model_test = model.copy()
+                    lag_transform = (model_test.lag_transform[k] or []) + [t]
+                    model_test.lag_transform[k] = lag_transform
+                    my_cv = bidirectional_cross_validate(model=model_test, df=df, cv_split=n_folds,
+                                                         test_size=H, metrics=metrics, step_size=step_size)
+                    score = my_cv[target_col].tolist()
+                    if score < scores:
+                        scores = score
+                        candidate = {'target': k, 'type': 'transform', 'name': t}
+                        improvement = True
+
+        # Update best features
+        if improvement:
+            best_score = scores
+            if candidate['type'] == 'lag':
+                best_features["best_lags"][candidate['target']].append(candidate['name']) # store lags by target
+                remaining_lags[candidate['target']].remove(candidate['name'])
+            elif candidate['type'] == 'exog':
+                best_features["best_exogs"].append(candidate['name'])
+                candidate_features.remove(candidate['name'])
+                df[candidate['name']] = df_orig[candidate['name']]
+            elif candidate['type'] == 'transform':
+                best_features["best_transforms"][candidate['target']].append(candidate['name'])
+                transformations[candidate['target']].remove(candidate['name'])
+                if model.lag_transform is None:
+                    transform_dict = {candidate['target']: [candidate['name']]}
+                    model.lag_transform = transform_dict
+                else:
+                    if candidate['target'] not in model.lag_transform:
+                        model.lag_transform[candidate['target']] = [candidate['name']]
+                    else:
+                        model.lag_transform[candidate['target']].append(candidate['name'])
+
+            if verbose:
+                if candidate['type'] == 'transform':
+                    print(f"Added {candidate['type']} for target {candidate['target']}: {candidate['name'].get_name()} with score: {best_score}")
+                else:
+                    print(f"Added {candidate['type']} for target {candidate['target']}: {candidate['name']} with score: {best_score}")
+        else:
+            break  # No improvement
+
+    if transformations is not None:
+        for key, trans in best_features["best_transforms"].items():
+            if trans:  # only process non-empty lists
+                best_features["best_transforms"][key] = [t.get_name() for t in trans]
+
+    if lags_to_consider is not None:
+        # sort the lags for each variable
+        for key in best_features["best_lags"]:
+            best_features["best_lags"][key].sort()
+
+    return best_features
+
+
+def var_backward_feature_selection(df, target_col, n_folds = None, H = None, model = None, metrics = None,
+                                  lags_to_consider = None, candidate_features = None, transformations = None, 
+                                    step_size = None, verbose = False):
+    """
+    Performs backward lag selection for Regression models.
+    Parameters:
+        df (pd.DataFrame): DataFrame containing the time series data.
+        target_col (str): The target column for accuracy evaluation.
+        n_folds (int, optional): Number of cross-validation folds.
+        H (int, optional): Forecast horizon.
         model: The forecasting model to be used.
         metrics (list): List of metrics to evaluate the model.
         step_size (int, optional): Step size for cross-validation. Defaults to None.
-        forward_back (bool, optional): Whether to perform forward-backward selection. Defaults to False.
         verbose (bool, optional): Whether to print progress. Defaults to False.
     Returns:
-        dict: Dictionary of best lags for each variable.
+        dict: Dictionary of best features for each variable.
+
     """
-    max_lag = max_lags
-    min_lag =min_lags
-    lags = list(range(1, max_lag+1))
+
+    # remaining_lags = {i:list(range(1, j+1)) for i, j in lags_to_consider.items()}
+    # best_lags = {i:[] for i in max_lags}
+    best_features = {
+        "best_lags": {i: list(range(1, j+1)) for i, j in (lags_to_consider or {}).items()},
+        "best_exogs": candidate_features.copy() if candidate_features is not None else [],
+        "best_transforms": {i: j for i, j in (transformations or {}).items()}
+}
     
+    ## setting the full model
+    if lags_to_consider is not None:
+        model.n_lag = best_features["best_lags"]  # Start with all lags to consider
+    if transformations is not None:
+        model.lag_transform = best_features["best_transforms"]  # Start with all transformations to consider
+    # exogenous variables should be in df before passing df
     best_score = list(np.repeat(float('inf'), len(metrics)))
     
-    worst_lags = []
-    best_lags = None
-    while len(lags) >= min_lag:
-        worst_lag=None
-        for lg in lags:
-            lags_to_test = [x for x in lags if x != lg]
-            lags_to_test.sort()
-            model.n_lag = lags_to_test
-            my_cv = cross_validate(model=model, df=df, cv_split=n_folds,
-                                   test_size=H, metrics=metrics, step_size=step_size)
-            scores = my_cv["score"].tolist()
-            if scores<best_score:
-                best_lags = lags_to_test
-                best_score = scores
-                worst_lag = lg
-        if worst_lag is not None:
-            # lags.append(best_lag)
-            lags.remove(worst_lag)
-            worst_lags.append(worst_lag)
-            # print(lags)
-            lags.sort()
-            best_lags.sort()
-            if verbose == True:
-        # print worst variable, lags and current score
-                print(f'worst lag: {worst_lag} with score: {best_score}')
-        else:
-            break
-    
-    if forward_back ==True:
-    
-        orj_lags = worst_lags.copy()
-        orj_lags.sort()
-        len_worst = len(orj_lags)
-        
-        while len(worst_lags)>0:
-            for i in range(len_worst):
-                best_lag = None
-                for lg in worst_lags:
-                    current_lag = best_lags + [lg]
-                    current_lag.sort()
-                    # lag_model = model(**model_params, n_lag = current_lag)
-                    model.n_lag = current_lag
-                    my_cv = cross_validate(model=model, df=df, cv_split=n_folds,
-                                           test_size=H, metrics=metrics, step_size=step_size)
-                    scores = my_cv["score"].tolist()
-                    if scores<best_score:
-                        best_score = scores
-                        best_lag = lg 
-                        
-                if best_lag is not None:
-                    best_lags.append(best_lag)
-                    worst_lags.remove(best_lag)
-                    if verbose == True:
-                # print worst variable, lags and current score
-                        print(f'best lag after backward: {best_lag} with score: {best_score}')
-                    best_lags.sort()
-                    # if verbose = True:
-                    #     print(best_lags)
-                else:
-                    break
-            if best_lag is None:
-                break
-            worst_lags = [item for item in orj_lags if item not in best_lags]
-            lags.sort()
-            if worst_lags == orj_lags:
-                break
-            else:
-                orj_lags = [item for item in orj_lags if item not in best_lags]
-                orj_lags.sort()
-    return best_lags
-
-
-def var_forward_lag_selection(df, model, max_lags, target_col, n_folds, H, metrics, step_size=None, verbose = False):
-    """
-    Performs forward lag selection for Vektor Autoregressive models and bidirectional ml models
-    Args:
-        df (pd.DataFrame): DataFrame containing the time series data.
-        model: The forecasting model to be used.
-        max_lags (dict): Dictionary of maximum lags for each variable.
-        n_folds (int): Number of folds for cross-validation.
-        target_col (str): The target column for forecasting.
-        H (int): Forecast horizon.
-        model_params (dict): Parameters for the model.
-        metrics (list): List of metrics to evaluate the model.
-        step_size (int, optional): Step size for lag selection. Defaults to None
-        verbose (bool, optional): Whether to print progress. Defaults to False.
-    Returns:
-        dict: Dictionary of best lags for each variable.
-    """
-
-    max_lag = sum(x for x in max_lags.values())
-        
-    orj_lags = {i:list(range(1, max_lags[i]+1)) for i in max_lags}
-    # lags = list(range(1, max_lags+1))
-    lags = {i:list(range(1, max_lags[i]+1)) for i in max_lags}
-    best_lags = {i:[] for i in max_lags}
-    
-    best_score = list(np.repeat(float('inf'), len(metrics)))
-    
-    while max_lag>0:
-        for i in range(max_lag):
-            best_lag = None
-            best_target = None
-            for k, lg in lags.items():
-                for x in lg:
-                    current_lag = {a:b for a, b in best_lags.items()}
-                    current_lag[k] = best_lags[k] + [x]
-                    current_lag[k].sort()
-                    model.n_lag = current_lag
-                    my_cv = bidirectional_cross_validate(model=model, df=df, cv_split=n_folds,
+    while True:
+        improvement = False
+        candidate = {'target': None, 'type': None, 'name': None}
+        scores = best_score
+        if lags_to_consider is not None:
+            for targ_l, lags in best_features["best_lags"].items():
+                for lg in lags:
+                    lags_to_test = {a:b for a, b in lags.items()}
+                    # Remove the current lag lg from current target
+                    lags_to_test[targ_l] = [x for x in lags if x != lg]
+                    lags_to_test[targ_l].sort()
+                    model_test = model.copy()
+                    model_test.n_lag = lags_to_test
+                    my_cv = bidirectional_cross_validate(model=model_test, df=df, cv_split=n_folds,
                                                          test_size=H, metrics=metrics, step_size=step_size)
-
+                    score = my_cv[target_col].tolist()
+                    if score < scores:
+                        scores = score
+                        candidate = {'target': targ_l, 'type': 'lag', 'name': lg}
+                        improvement = True
+        if transformations is not None:
+            for targ_t, trans in best_features["best_transforms"].items():
+                for tr in trans:
+                    trans_to_test = {a:b for a, b in best_features["best_transforms"].items()}
+                    trans_to_test[targ_t] = [x for x in trans if x != tr]
+                    model_test = model.copy()
+                    # model_test.lags = remaining_lags
+                    model_test.lag_transform = trans_to_test
+                    my_cv = bidirectional_cross_validate(model=model_test, df=df, cv_split=n_folds,
+                                                         test_size=H, metrics=metrics, step_size=step_size)
                     scores = my_cv[target_col].tolist()
-                    if scores<best_score:
-                        best_score = scores
-                        best_lag = x
-                        best_target = k
-            if best_lag is not None:
-                best_lags[best_target].append(best_lag)
-                lags[best_target].remove(best_lag)
-                best_lags[best_target].sort()
-                max_lag = sum(len(x) for x in lags.values())
-                if verbose == True:
-            # print worst variable, lags and current score
-                    print(f'Variable of best lag after backward: {best_target} with lag {best_lag}, current score: {best_score}')
-            else:
-                break
-        lags = {i:[item for item in orj_lags[i] if item not in best_lags[i]] for i in max_lags.keys()}
-        # lags.sort()
-        if lags == orj_lags:
-            break
-        else:
-            orj_lags = {i:[item for item in orj_lags[i] if item not in best_lags[i]] for i in max_lags.keys()}
-            # orj_lags.sort()
-            max_lag = sum(len(x) for x in orj_lags.values())
+                    if score < scores:
+                        scores = score
+                        candidate = {'target': targ_t, 'type': 'transform', 'name': trans}
+                        improvement = True
+        if candidate_features is not None:
+            for feat in best_features["best_exogs"]:
+                # feat_to_test = [x for x in candidate_features if x != feat]
+                df_test = df.drop(columns=feat)
+                model_test = model.copy()
+                model_test.data_prep(df_test) # update data preparation because if new lags to be consistent with coefficients
+                model_test.compute_coeffs() # update model coefficients because of new lags
+                my_cv = bidirectional_cross_validate(model=model_test, df=df_test, cv_split=n_folds,
+                                                         test_size=H, metrics=metrics, step_size=step_size)
+                score = my_cv[target_col].tolist()
+                if score < scores:
+                    scores = score
+                    candidate = {'target': None, 'type': 'exog', 'name': feat}
+                    improvement = True
 
-    return best_lags
-
-def var_backward_lag_selection(df, model, max_lags, min_lags, n_folds,target_col, H, metrics, step_size=None, forward_back=False, verbose = False):
-    """
-    Performs backward lag selection for Vektor Autoregressive models.
-    Args:
-        df (pd.DataFrame): DataFrame containing the time series data.
-        model: The forecasting model to be used.
-        max_lags (dict): Dictionary of maximum lags for each variable.
-        min_lags (int): Minimum number of lags to retain.
-        n_folds (int): Number of folds for cross-validation.
-        target_col (str): The target column for forecasting.
-        H (int): Forecast horizon.
-        model_params (dict): Parameters for the model.
-        metrics (list): List of metrics to evaluate the model.
-        forward_back (bool, optional): Whether to perform forward-backward selection. Defaults to False.
-        verbose (bool, optional): Whether to print progress. Defaults to False.
-    Returns:
-        dict: Dictionary of best lags for each variable.
-    """
-
-    max_lag = sum(x for x in max_lags.values()) 
-    
-    orj_lags = {i:list(range(1, max_lags[i]+1)) for i in max_lags}
-    # lags = list(range(1, max_lags+1))
-    lags = {i:list(range(1, max_lags[i]+1)) for i in max_lags}
-    best_lags = {i:[] for i in max_lags}
-    
-    best_score = list(np.repeat(float('inf'), len(metrics)))
-    
-    worst_lags = {i:[] for i in max_lags} # to store wost lags
-    while max_lag >= min_lags: 
-        worst_lag=None
-        worst_k = None
-        for k, lg in lags.items(): # Iterate over each variable's lags
-            for r in lg: # try and test each lag
-                lags_to_test = {a:b for a, b in lags.items()}
-                lags_to_test[k] = [x for x in lg if x != r] # Remove the current lag r
-                lags_to_test[k].sort()
-                model.n_lag = lags_to_test
-                my_cv = bidirectional_cross_validate(model=model, df=df, cv_split=n_folds,
-                                                     test_size=H, metrics=metrics, step_size=step_size)
-                scores = my_cv[target_col].tolist()
-                if scores < best_score:
-                    best_score = scores
-                    worst_lag = r # update the worst lag
-                    worst_k = k # update the worst variable whose lag was worst_lag
-                    best_lags = lags_to_test # update the best lags
-        if worst_lag is not None: # If a worst lag was found
-            # lags.append(best_lag)
-            lags[worst_k].remove(worst_lag) # Remove the worst lag from the variable worst_k
-            lags[worst_k].sort()
-            # best_lags[worst_k].remove(worst_lag)
-            worst_lags[worst_k].append(worst_lag)
-            worst_lags[worst_k].sort()
-            if verbose == True:
-                # print worst variable, lags and current score
-                print(f'Worst lag\'s variable: {worst_k} with lag {worst_lag}, current score: {best_score}')
-            max_lag = sum(len(x) for x in lags.values())
-                
-        else:
-            break
-    
-    if forward_back ==True:
-    
-        orj_lags = worst_lags.copy()
-        # orj_lags.sort()
-        len_worst = sum(len(x) for x in worst_lags.values())
-        
-        while len_worst>0:
-            for i in range(len_worst):
-                best_lag = None
-                best_k = None
-                for k, lg in worst_lags.items():
-                    for x in lg:
-                        current_lag = {a:b for a, b in best_lags.items()}
-                        current_lag[k] = best_lags[k] + [x]
-                        current_lag[k].sort()
-                        model.n_lag = current_lag
-                        my_cv = bidirectional_cross_validate(model=model, df=df, cv_split=n_folds,
-                                                             test_size=H, metrics=metrics, step_size=step_size)
-                        scores = my_cv[target_col].tolist()
-                        if scores < best_score:
-                            best_score = scores
-                            best_lag = x # update the best lag
-                            best_k = k # update the best variable whose lag was best_lag
-
-                if best_lag is not None:
-                    best_lags[best_k].append(best_lag)
-                    worst_lags[best_k].remove(best_lag)
-
-                    best_lags[best_k].sort()
-                    len_worst = sum(len(x) for x in worst_lags.values()) #  update len worst
-                    if verbose == True:
-                # print worst variable, lags and current score
-                        print(f'Variable of best lag after backward: {best_k} with lag {best_lag}, current score: {best_score}')
+        # Update best features
+        if improvement and candidate['type']:
+            best_score = scores
+            if candidate['type'] == 'lag':
+                best_features["best_lags"][candidate['target']].remove(candidate['name'])
+            elif candidate['type'] == 'exog':
+                best_features["best_exogs"].remove(candidate['name'])
+                df = df.drop(columns=candidate['name'])
+            elif candidate['type'] == 'transform':
+                best_features["best_transforms"][candidate['target']].remove(candidate['name'])
+                if any(best_features["best_transforms"][key] for key in best_features["best_transforms"]):
+                    best_features["best_transforms"] = {k: v for k, v in best_features["best_transforms"].items() if not len(v) == 0}
+                    model.lag_transform = best_features["best_transforms"]
                 else:
-                    break
-                    
-            worst_lags = {i:[item for item in orj_lags[i] if item not in best_lags[i]] for i in max_lags}
-            len_worst = sum(len(x) for x in worst_lags.values())
-            
-            if worst_lags == orj_lags: #check if no lags is added
-                break
-            else:
-                orj_lags = {i:[item for item in orj_lags[i] if item not in best_lags[i]] for i in max_lags}
-    return best_lags
+                    model.lag_transform = None
+
+            if verbose:
+                if candidate['type'] == 'transform':
+                    print(f"Removed {candidate['type']} for target {candidate['target']}: {candidate['name'].get_name()} with score: {best_score}")
+                else:
+                    print(f"Removed {candidate['type']} for target {candidate['target']}: {candidate['name']} with score: {best_score}")
+        else:
+            break  # No improvement
+
+    # if transformations is not None and at least one key is not empty get their names
+    if transformations is not None:
+        for key, trans in best_features["best_transforms"].items():
+            if trans:  # only process non-empty lists
+                best_features["best_transforms"][key] = [t.get_name() for t in trans]
+    if lags_to_consider is not None:
+        # sort the lags for each variable
+        for key in best_features["best_lags"]:
+            best_features["best_lags"][key].sort()
+
+
+    return best_features
 
 
 #------------------------------------------------------------------------------
