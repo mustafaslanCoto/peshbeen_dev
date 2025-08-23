@@ -1653,55 +1653,6 @@ def hmm_cross_validate(model, df, cv_split, test_size, metrics, learn_per_fold =
     overall_performance = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
     return pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
 
-def hmm_cross_validate2(model, df, cv_split, test_size, metrics, learn_per_fold = None, step_size= None):
-    """
-    Run cross-validation using time series splits.
-
-    Args:
-        model (class): Machine learning model class (e.g., CatBoostRegressor, LGBMRegressor).
-        df (pd.DataFrame): Input data.
-        cv_split (int): Number of splits in TimeSeriesSplit.
-        test_size (int): Size of test window.
-        metrics (list): List of metric functions.
-        learn (bool): If True, learn parameters on the entire dataset, otherwise fit the model on each fold.
-        learn_per_fold (str): If "first", learns parameters on the first fold and fits on the rest,
-        if "all", learns on all folds, if "None", do not learn, just fit the model.
-        step_size (int): Step size for time series cross-validation.
-    
-    Returns:
-        pd.DataFrame: Performance metrics for CV.
-    """
-    tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
-    metrics_dict = {m.__name__: [] for m in metrics}
-    for idx, (train_index, test_index) in enumerate(tscv.split(df)):
-        train, test = df.iloc[train_index], df.iloc[test_index]
-        x_test = test.drop(columns=[model.target_col])
-        y_test = np.array(test[model.target_col])
-
-        # If it is first fold, fit the model
-        if (idx == 0) and (learn_per_fold in ["first", "all"]):
-            model.fit_em(train)
-        # If learning per fold, learn the model on each fold
-        elif (learn_per_fold == "all") and (idx != 0):
-            model.fit_em(train)
-        # If not learning per fold, fit the model on the first fold
-        else: # learn_per_fold == "None" or learn_per_fold == "first" for remaining folds
-            model.fit(train)
-
-        # Forecast using the model
-        bb_forecast = model.forecast2(test_size, exog=x_test)
-        # Evaluate each metric
-        for m in metrics:
-            if m.__name__ == 'MASE':
-                eval_val = m(y_test, bb_forecast)
-            else:
-                eval_val = m(y_test, bb_forecast)
-            metrics_dict[m.__name__].append(eval_val)
-    overall_performance = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
-    return pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
-
-
-
 def hmm_mv_cross_validate(model, df, cv_split, test_size, metrics, learn_per_fold=None, step_size=None):
     """
     Cross-validate the bidirectional Vector Autoregressive Hidden Markov model.

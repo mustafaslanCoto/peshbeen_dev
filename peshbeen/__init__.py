@@ -6,7 +6,7 @@ from peshbeen.model_selection import (cross_validate,  mv_cross_validate,
                                       mv_forward_feature_selection, mv_backward_feature_selection,
                                       hmm_forward_feature_selection, hmm_backward_feature_selection,
                                       hmm_mv_forward_feature_selection, hmm_mv_backward_feature_selection,
-                                      hmm_cross_validate, hmm_mv_cross_validate, hmm_cross_validate2)
+                                      hmm_cross_validate, hmm_mv_cross_validate)
 from peshbeen.statplots import (cross_autocorrelation_plot, plot_PACF_ACF)
 from peshbeen.stattools import (unit_root_test, cross_autocorrelation)
 from peshbeen.transformations import (fourier_terms, rolling_quantile,
