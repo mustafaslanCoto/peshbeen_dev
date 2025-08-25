@@ -69,7 +69,7 @@ class conformalizer():
             raise RuntimeError("Conformalizer must be calibrated before generating prediction intervals. Run .calibrate(df_calibration) first.")
         self.model.fit(df)
         if future_exog is not None:
-            y_forecast = np.array(self.model.forecast(n_ahead=self.H, future_exog))
+            y_forecast = np.array(self.model.forecast(self.H, future_exog))
         else:
             y_forecast = np.array(self.model.forecast(n_ahead=self.H))
         result = [y_forecast]
