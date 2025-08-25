@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from statsforecast.models import ARIMA, AutoARIMA, TBATS, AutoTBATS
-from model_selection import ParametricTimeSeriesSplit
+from peshbeen.model_selection import ParametricTimeSeriesSplit
 from scipy.stats import gaussian_kde
 
 class conformalizer():
