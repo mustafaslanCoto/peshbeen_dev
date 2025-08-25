@@ -23,7 +23,7 @@ class conformalizer():
         self.verbose = verbose
         self.H = H
 
-    def generate_horizon_forecasts(self, df):
+    def non_conformity_scores(self, df):
         c_actuals, c_forecasts = [], []
         # Create time series cross-validator that slides 1 time step for each training window
         tscv = ParametricTimeSeriesSplit(n_splits=self.n_calib, test_size=self.H, step_size=self.sliding_window)
@@ -54,7 +54,7 @@ class conformalizer():
     
     
     def calibrate(self, df):
-        self.generate_horizon_forecasts(df=df)
+        self.non_conformity_scores(df=df)
         h_quantiles = []
         for i in range(self.H):
             q_hat = self.calculate_quantile(self.non_conform[i])
