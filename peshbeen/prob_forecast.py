@@ -86,7 +86,8 @@ class conformalizer():
                 result.extend([y_lower, y_upper])
                 col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
         # distributions for each horizons. So add y_forecast array to each columns of self.resid and equal to self.dist
-        self.dist = y_forecast[:, None] + self.resid
+        dist = y_forecast[:, None] + self.resid
+        self.dist = pd.DataFrame(dist.T, columns=[f'h_{i+1}' for i in range(self.H)])
         return pd.DataFrame(np.column_stack(result), columns=col_names)
 
     def sample_predictions(self, samples=1000, df=None, future_exog=None):
@@ -103,7 +104,7 @@ class conformalizer():
         else:
             y_forecast = np.array(self.model.forecast(self.H))
         sampled_predictions = np.column_stack([gaussian_kde(self.resid[:, i]).resample(size=samples)[0] for i in range(self.H)]) #  sample from the distribution approximated by KDE
-        sampled_predictions += y_forecast[:, None] # add the forecast to the sampled residuals
+        sampled_predictions += y_forecast[:, None].T # add the forecast to the sampled residuals
         # generate quantiles from sampled predictions
         return pd.DataFrame(sampled_predictions, columns=[f'h_{i+1}' for i in range(self.H)])
     

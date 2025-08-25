@@ -303,7 +303,7 @@ def mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model
                     current_lag[k] = best_features['best_lags'][k] + [x]
                     current_lag[k].sort()
                     model_test.n_lag = current_lag
-                    my_cv = bidirectional_cross_validate(model=model_test, df=df, cv_split=n_folds,
+                    my_cv = mv_cross_validate(model=model_test, df=df, cv_split=n_folds,
                                                          test_size=H, metrics=metrics, step_size=step_size)
 
                     score = my_cv[target_col].tolist()
@@ -318,7 +318,7 @@ def mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model
                 df_test = df.copy()
                 df_test[feat] = df_orig[feat]
                 model_test = model.copy()
-                my_cv = bidirectional_cross_validate(model=model_test, df=df_test, cv_split=n_folds, test_size=H,
+                my_cv = mv_cross_validate(model=model_test, df=df_test, cv_split=n_folds, test_size=H,
                                                      metrics=metrics, step_size=step_size)
                 score = my_cv[target_col].tolist()
                 if score < scores:
@@ -333,7 +333,7 @@ def mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model
                     model_test = model.copy()
                     lag_transform = (model_test.lag_transform[k] or []) + [t]
                     model_test.lag_transform[k] = lag_transform
-                    my_cv = bidirectional_cross_validate(model=model_test, df=df, cv_split=n_folds,
+                    my_cv = mv_cross_validate(model=model_test, df=df, cv_split=n_folds,
                                                          test_size=H, metrics=metrics, step_size=step_size)
                     score = my_cv[target_col].tolist()
                     if score < scores:
@@ -432,7 +432,7 @@ def mv_backward_feature_selection(df, target_col, n_folds = None, H = None, mode
                     lags_to_test[targ_l].sort()
                     model_test = model.copy()
                     model_test.n_lag = lags_to_test
-                    my_cv = bidirectional_cross_validate(model=model_test, df=df, cv_split=n_folds,
+                    my_cv = mv_cross_validate(model=model_test, df=df, cv_split=n_folds,
                                                          test_size=H, metrics=metrics, step_size=step_size)
                     score = my_cv[target_col].tolist()
                     if score < scores:
@@ -447,7 +447,7 @@ def mv_backward_feature_selection(df, target_col, n_folds = None, H = None, mode
                     model_test = model.copy()
                     # model_test.lags = remaining_lags
                     model_test.lag_transform = trans_to_test
-                    my_cv = bidirectional_cross_validate(model=model_test, df=df, cv_split=n_folds,
+                    my_cv = mv_cross_validate(model=model_test, df=df, cv_split=n_folds,
                                                          test_size=H, metrics=metrics, step_size=step_size)
                     scores = my_cv[target_col].tolist()
                     if score < scores:
@@ -461,7 +461,7 @@ def mv_backward_feature_selection(df, target_col, n_folds = None, H = None, mode
                 model_test = model.copy()
                 model_test.data_prep(df_test) # update data preparation because if new lags to be consistent with coefficients
                 model_test.compute_coeffs() # update model coefficients because of new lags
-                my_cv = bidirectional_cross_validate(model=model_test, df=df_test, cv_split=n_folds,
+                my_cv = mv_cross_validate(model=model_test, df=df_test, cv_split=n_folds,
                                                          test_size=H, metrics=metrics, step_size=step_size)
                 score = my_cv[target_col].tolist()
                 if score < scores:
@@ -557,8 +557,8 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
                 model_test.lags = current_lags
                 model_test.data_prep(df)
                 model_test.compute_coeffs()
-                cv_result = ar_cross_validate(model=model_test, df=df, cv_split=n_folds, test_size=H,
-                                            metrics=metrics, step_size=step_size, learn_per_fold=learn_fold)
+                cv_result = hmm_cross_validate(model=model_test, df=df, cv_split=n_folds, test_size=H,
+                                            metrics=metrics, step_size=step_size)
                 score = cv_result["score"].tolist()
                 if score < scores:
                     scores = score
@@ -573,8 +573,8 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
                 model_test = model.copy()
                 model_test.data_prep(df_test)
                 model_test.compute_coeffs()
-                cv_result = ar_cross_validate(model=model_test, df=df_test, cv_split=n_folds, test_size=H,
-                                            metrics=metrics, step_size=step_size, learn_per_fold=learn_fold)
+                cv_result = hmm_cross_validate(model=model_test, df=df_test, cv_split=n_folds, test_size=H,
+                                            metrics=metrics, step_size=step_size)
                 score = cv_result["score"].tolist()
                 if score < scores:
                     scores = score
@@ -589,8 +589,8 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
                 model_test.lag_transform = lag_transform
                 model_test.data_prep(df)
                 model_test.compute_coeffs()
-                cv_result = ar_cross_validate(model=model_test, df=df, cv_split=n_folds, test_size=H,
-                                            metrics=metrics, step_size=step_size, learn_per_fold=learn_fold)
+                cv_result = hmm_cross_validate(model=model_test, df=df, cv_split=n_folds, test_size=H,
+                                            metrics=metrics, step_size=step_size)
                 score = cv_result["score"].tolist()
                 if score < scores:
                     scores = score
@@ -673,8 +673,8 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
                 model_test.lags = lags_to_test
                 model_test.data_prep(df) # update data preparation because if new lags to be consistent with coefficients
                 model_test.compute_coeffs() # update model coefficients because of new lags
-                my_cv = ar_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
-                                metrics = metrics, step_size= step_size,learn_per_fold = learn_fold)
+                my_cv = hmm_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
+                                metrics = metrics, step_size= step_size)
                 score = my_cv["score"].tolist()
                 if score < scores:
                     scores = score
@@ -687,8 +687,8 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
                 model_test.lag_transform = trans_to_test
                 model_test.data_prep(df) # update data preparation because if new lags to be consistent with coefficients
                 model_test.compute_coeffs() # update model coefficients because of new lags
-                my_cv = ar_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
-                                metrics = metrics, step_size= step_size,learn_per_fold = learn_fold)
+                my_cv = hmm_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
+                                metrics = metrics, step_size= step_size)
                 score = my_cv["score"].tolist()
                 if score < scores:
                     scores = score
@@ -701,8 +701,8 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
                 model_test = model.copy()
                 model_test.data_prep(df_test) # update data preparation because if new lags to be consistent with coefficients
                 model_test.compute_coeffs() # update model coefficients because of new lags
-                my_cv = ar_cross_validate(model = model_test, df=df_test, cv_split=n_folds, test_size=H,
-                                metrics = metrics, step_size= step_size,learn_per_fold = learn_fold)
+                my_cv = hmm_cross_validate(model = model_test, df=df_test, cv_split=n_folds, test_size=H,
+                                metrics = metrics, step_size= step_size)
                 score = my_cv["score"].tolist()
                 if score < scores:
                     scores = score
@@ -792,8 +792,8 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
 
                     model_test.data_prep(df) # update data preparation because if new lags to be consistent with coefficients
                     model_test.compute_coeffs() # update model coefficients because of new lags
-                    my_cv = hmm_var_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
-                                        metrics = metrics, step_size= step_size,learn_per_fold = learn_fold)
+                    my_cv = hmm_mv_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
+                                        metrics = metrics, step_size= step_size)
 
                     score = my_cv[target_col].tolist()
                     if score < scores:
@@ -809,8 +809,8 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
                 model_test = model.copy()
                 model_test.data_prep(df_test)
                 model_test.compute_coeffs()
-                my_cv = hmm_var_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
-                                    metrics = metrics, step_size= step_size,learn_per_fold = learn_fold)
+                my_cv = hmm_mv_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
+                                    metrics = metrics, step_size= step_size)
                 score = my_cv[target_col].tolist()
                 if score < scores:
                     scores = score
@@ -827,8 +827,8 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
 
                     model_test.data_prep(df)
                     model_test.compute_coeffs()
-                    cv_result = hmm_var_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
-                                        metrics = metrics, step_size= step_size,learn_per_fold = learn_fold)
+                    cv_result = hmm_mv_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
+                                        metrics = metrics, step_size= step_size)
                     score = cv_result[target_col].tolist()
                     if score < scores:
                         scores = score
@@ -927,8 +927,8 @@ def hmm_mv_backward_feature_selection(df, target_col, n_folds = None, H = None, 
                     # model_test.lag_transform = transformations # only to test lags excluded
                     model_test.data_prep(df) # update data preparation because if new lags to be consistent with coefficients
                     model_test.compute_coeffs() # update model coefficients because of new lags
-                    my_cv = hmm_var_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
-                                        metrics = metrics, step_size= step_size,learn_per_fold = learn_fold)
+                    my_cv = hmm_mv_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
+                                        metrics = metrics, step_size= step_size)
                     score = my_cv[target_col].tolist()
                     if score < scores:
                         scores = score
@@ -944,8 +944,8 @@ def hmm_mv_backward_feature_selection(df, target_col, n_folds = None, H = None, 
                     model_test.lag_transform = trans_to_test
                     model_test.data_prep(df) # update data preparation because if new lags to be consistent with coefficients
                     model_test.compute_coeffs() # update model coefficients because of new lags
-                    my_cv = hmm_var_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
-                                        metrics = metrics, step_size= step_size,learn_per_fold = learn_fold)
+                    my_cv = hmm_mv_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
+                                        metrics = metrics, step_size= step_size)
                     score = my_cv[target_col].tolist()
                     if score < scores:
                         scores = score
@@ -958,8 +958,8 @@ def hmm_mv_backward_feature_selection(df, target_col, n_folds = None, H = None, 
                 model_test = model.copy()
                 model_test.data_prep(df_test) # update data preparation because if new lags to be consistent with coefficients
                 model_test.compute_coeffs() # update model coefficients because of new lags
-                my_cv = hmm_var_cross_validate(model = model_test, df=df_test, cv_split=n_folds, test_size=H,
-                                metrics = metrics, step_size= step_size,learn_per_fold = learn_fold)
+                my_cv = hmm_mv_cross_validate(model = model_test, df=df_test, cv_split=n_folds, test_size=H,
+                                metrics = metrics, step_size= step_size)
                 score = my_cv[target_col].tolist()
                 if score < scores:
                     scores = score
@@ -1632,17 +1632,18 @@ def hmm_cross_validate(model, df, cv_split, test_size, metrics, learn_per_fold =
         y_test = np.array(test[model.target_col])
 
         # If it is first fold, fit the model
+        model_ = model.copy()
         if (idx == 0) and (learn_per_fold in ["first", "all"]):
-            model.fit_em(train)
+            model_.fit_em(train)
         # If learning per fold, learn the model on each fold
         elif (learn_per_fold == "all") and (idx != 0):
-            model.fit_em(train)
+            model_.fit_em(train)
         # If not learning per fold, fit the model on the first fold
         else: # learn_per_fold == "None" or learn_per_fold == "first" for remaining folds
-            model.fit(train)
+            model_.fit(train)
 
         # Forecast using the model
-        bb_forecast = model.forecast(test_size, exog=x_test)
+        bb_forecast = model_.forecast(test_size, exog=x_test)
         # Evaluate each metric
         for m in metrics:
             if m.__name__ == 'MASE':
