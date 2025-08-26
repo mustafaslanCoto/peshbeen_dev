@@ -620,10 +620,20 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
         else:
             break  # No improvement
 
+    # Finalize model with best features
+    model_ = model.copy()
+    if lags_to_consider is not None and best_features["best_lags"]:
+        model_.lags = best_features["best_lags"]
+    if transformations is not None and best_features["best_transforms"]:
+        model_.lag_transform = best_features["best_transforms"]
+    model_.data_prep(df)
+    model_.compute_coeffs()
+
+
     if transformations is not None and best_features["best_transforms"]:
         best_features["best_transforms"] = [trans.get_name() for trans in best_features["best_transforms"]]
-
-    return best_features
+    
+    return best_features, model_
 
 
 
@@ -729,10 +739,20 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
         else:
             break  # No improvement
 
+        # Finalize model with best features
+        model_ = model.copy()
+        if lags_to_consider is not None and best_features["best_lags"]:
+            model_.lags = best_features["best_lags"]
+        if transformations is not None and best_features["best_transforms"]:
+            model_.lag_transform = best_features["best_transforms"]
+        model_.data_prep(df)
+        model_.compute_coeffs()
+
+
     if transformations is not None and best_features["best_transforms"]:
         best_features["best_transforms"] = [trans.get_name() for trans in best_features["best_transforms"]]
 
-    return best_features
+    return best_features, model_
 
 
 def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model = None, metrics = None,
@@ -867,12 +887,22 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
         else:
             break  # No improvement
 
+    # Finalize model with best features
+    model_ = model.copy()
+    if lags_to_consider is not None and best_features["best_lags"]:
+        model_.lags = best_features["best_lags"]
+    if transformations is not None and best_features["best_transforms"]:
+        model_.lag_transform = best_features["best_transforms"]
+    model_.data_prep(df)
+    model_.compute_coeffs()
+
+
     if transformations is not None:
         for key, trans in best_features["best_transforms"].items():
             if trans:  # only process non-empty lists
                 best_features["best_transforms"][key] = [t.get_name() for t in trans]
 
-    return best_features
+    return best_features, model_
 
 
 def hmm_mv_backward_feature_selection(df, target_col, n_folds = None, H = None, model = None, metrics = None,
@@ -987,13 +1017,22 @@ def hmm_mv_backward_feature_selection(df, target_col, n_folds = None, H = None, 
         else:
             break  # No improvement
 
+    # Finalize model with best features
+    model_ = model.copy()
+    if lags_to_consider is not None and best_features["best_lags"]:
+        model_.lags = best_features["best_lags"]
+    if transformations is not None and best_features["best_transforms"]:
+        model_.lag_transform = best_features["best_transforms"]
+    model_.data_prep(df)
+    model_.compute_coeffs()
+
     # if transformations is not None and at least one key is not empty get their names
     if transformations is not None:
         for key, trans in best_features["best_transforms"].items():
             if trans:  # only process non-empty lists
                 best_features["best_transforms"][key] = [t.get_name() for t in trans]
 
-    return best_features
+    return best_features, model_
 
 #------------------------------------------------------------------------------
 # Holt-Winters Exponential Smoothing Model Tuning
