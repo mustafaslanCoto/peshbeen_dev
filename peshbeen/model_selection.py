@@ -533,7 +533,7 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
 
     if lags_to_consider is not None:
         remaining_lags = list(range(1, lags_to_consider + 1))
-        model.n_lag = None
+        model.lags = None
     if candidate_features is not None:
         candidate_features = candidate_features.copy()
         df = df.drop(columns=candidate_features)
