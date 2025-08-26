@@ -45,10 +45,10 @@ class conformalizer():
         # Vectorized quantile calculation for list delta
         if isinstance(self.delta, float):
             which_quantile = np.ceil(self.delta * (self.n_calib + 1)) / self.n_calib
-            return np.quantile(scores_calib, which_quantile, method="lower")
+            return np.quantile(scores_calib, which_quantile, method="lower", axis=0)
         elif isinstance(self.delta, list):
             which_quantiles = np.ceil(np.array(self.delta) * (self.n_calib + 1)) / self.n_calib
-            return np.array([np.quantile(scores_calib, q, method="lower") for q in which_quantiles])
+            return np.array([np.quantile(scores_calib, q, method="lower", axis=0) for q in which_quantiles])
         else:
             raise ValueError("delta must be float or list of floats.")
     
@@ -103,10 +103,28 @@ class conformalizer():
             y_forecast = np.array(self.model.forecast(self.H, future_exog))
         else:
             y_forecast = np.array(self.model.forecast(self.H))
-        sampled_predictions = np.column_stack([gaussian_kde(self.resid[:, i]).resample(size=samples)[0] for i in range(self.H)]) #  sample from the distribution approximated by KDE
-        sampled_predictions += y_forecast[:, None].T # add the forecast to the sampled residuals
+        sampled_resids = np.column_stack([gaussian_kde(self.resid[:, i]).resample(size=samples)[0] for i in range(self.H)]) #  sample from the distribution approximated by KDE
+        sampled_predictions = sampled_resids + y_forecast[:, None].T # add the forecast to the sampled residuals
+
+        # Generate conformal prediction intervals using sampled residuals
+        result = [y_forecast]
+        col_names = ["point_forecast"]
+        # absolute sample residuals for non-conformity scores:
+        abs_sampled_resids = np.abs(sampled_resids)
+        quantiles = self.calculate_quantile(abs_sampled_resids)
+        if isinstance(self.delta, float):
+            y_lower, y_upper = y_forecast - quantiles, y_forecast + quantiles
+            result.extend([y_lower, y_upper])
+            col_names.extend([f'lower_{int(self.delta*100)}', f'upper_{int(self.delta*100)}'])
+        elif isinstance(self.delta, list):
+            for idx, d in enumerate(self.delta):
+                y_lower, y_upper = y_forecast - quantiles[idx], y_forecast + quantiles[idx]
+                result.extend([y_lower, y_upper])
+                col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
+        self.conformalized_sample_predictions = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.sampled_forecasts = pd.DataFrame(sampled_predictions, columns=[f'h_{i+1}' for i in range(self.H)])
         # generate quantiles from sampled predictions
-        return pd.DataFrame(sampled_predictions, columns=[f'h_{i+1}' for i in range(self.H)])
+        return self.conformalized_sample_predictions
     
 class s_arima_conformalizer():
     def __init__(self, model, delta, n_windows, H, calib_metric = "mae"):
