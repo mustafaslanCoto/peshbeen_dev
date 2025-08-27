@@ -52,8 +52,7 @@ def unit_root_test(series, method = "ADF", n_lag = None):
     else:
         return print('Enter a valid unit root test method')
 
-## Serial Corelation Check
-
+## Cross Corelation Check
 
 def cross_autocorrelation(x, y, nlags, adjusted=True, alpha=None, bartlett_confint=False):
     """
@@ -92,8 +91,8 @@ def cross_autocorrelation(x, y, nlags, adjusted=True, alpha=None, bartlett_confi
     var_y = np.sum((y - y_mean)**2)
 
     # Autocovariance but make sure make adjusted, meaning applying 1/(n-k) or 1/n
-    cc = np.empty(nlags + 1)
-    for k in range(nlags + 1):
+    cc = np.empty(nlags)
+    for k in range(nlags):
         num = np.sum((y[:n-k] - y_mean) * (x[k:] - x_mean))
         r = num / np.sqrt(var_x * var_y)
         if adjusted and k > 0:
@@ -113,10 +112,9 @@ def cross_autocorrelation(x, y, nlags, adjusted=True, alpha=None, bartlett_confi
                 se[1:] = np.sqrt((1.0 + 2.0 * prev_sum) / n)
             se[0] = 0.0
         else:
-            se[1:] = 1.0 / np.sqrt(n)
-            se[0] = 0.0
+            se = np.array([1.0 / np.sqrt(n) for _ in range(nlags)])
 
         confint = np.column_stack((cc - z*se, cc + z*se))
         return cc, confint
     else:
-        return cc, None
+        return cc, None 
