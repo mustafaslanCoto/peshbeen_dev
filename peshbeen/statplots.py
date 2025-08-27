@@ -100,8 +100,8 @@ def cross_autocorrelation_plot(x, y, nlags, adjusted=True, alpha=0.05, figsize=(
     var_y = np.sum((y - y_mean)**2)
 
     # Autocovariance but make sure make adjusted, meaning applying 1/(n-k) or 1/n
-    cc = np.empty(nlags + 1)
-    for k in range(nlags + 1):
+    cc = np.empty(nlags)
+    for k in range(nlags):
         num = np.sum((y[:n-k] - y_mean) * (x[k:] - x_mean))
         r = num / np.sqrt(var_x * var_y)
         if adjusted and k > 0:
@@ -117,11 +117,11 @@ def cross_autocorrelation_plot(x, y, nlags, adjusted=True, alpha=0.05, figsize=(
     bound = z / np.sqrt(den)
     # Bar plot of cross-correlation
     plt.figure(figsize=figsize)
-    plt.bar(np.arange(nlags + 1), cc, edgecolor='k', label='Cross-correlation')
+    plt.bar(np.arange(nlags), cc, edgecolor='k', label='Cross-correlation')
 
     z = NormalDist().inv_cdf(1 - alpha/2)
     bound = z / np.sqrt(n - nlags) if adjusted else z / np.sqrt(n)
-    lag_x = np.arange(nlags + 1)
+    lag_x = np.arange(nlags)
     plt.fill_between(lag_x, -bound, bound, color='gray', alpha=0.15, label='Confidence Interval')
     plt.axhline(bound, color='red', linewidth=0.8, alpha=0.7, linestyle='--')
     plt.axhline(-bound, color='red', linewidth=0.8, alpha=0.7, linestyle='--')
