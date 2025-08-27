@@ -1212,10 +1212,12 @@ def cv_hmm_lag_tune(
         Best hyperparameter values found.
     """
     tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
-    lag_space = {f"lag_{i}": hp.choice(f"lag_{i}", [0, 1]) for i in range(1, lag_space + 1)}
-    def objective(lag_space):
+    
+    max_lag = lag_space 
+    space = {f"lag_{i}": hp.choice(f"lag_{i}", [0, 1]) for i in range(1, max_lag + 1)}
+    def objective(params):
 
-        selected_lags = [i for i in range(1, lag_space+1) if lag_space[f"lag_{i}"] == 1]
+        selected_lags = [i for i in range(1, max_lag + 1) if params[f"lag_{i}"] == 1]
         model_ = model.copy()
         model_.lags = selected_lags
 
@@ -1255,7 +1257,7 @@ def cv_hmm_lag_tune(
     trials = Trials()
     best_hyperparams = fmin(
         fn=objective,
-        space=lag_space,
+        space=space,
         algo=tpe.suggest,
         max_evals=eval_num,
         trials=trials,
@@ -1784,10 +1786,11 @@ def cv_lag_tune(
         Best hyperparameter values found.
     """
     tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
-    lag_space = {f"lag_{i}": hp.choice(f"lag_{i}", [0, 1]) for i in range(1, lag_space + 1)}
-    def objective(lag_space):
+    max_lag = lag_space
+    space = {f"lag_{i}": hp.choice(f"lag_{i}", [0, 1]) for i in range(1, max_lag + 1)}
+    def objective(params):
 
-        selected_lags = [i for i in range(1, lag_space+1) if lag_space[f"lag_{i}"] == 1]
+        selected_lags = [i for i in range(1, max_lag + 1) if params[f"lag_{i}"] == 1]
         model_ = model.copy()
         model_.n_lag = selected_lags
 
@@ -1824,7 +1827,7 @@ def cv_lag_tune(
     trials = Trials()
     best_hyperparams = fmin(
         fn=objective,
-        space=lag_space,
+        space=space,
         algo=tpe.suggest,
         max_evals=eval_num,
         trials=trials,
@@ -1835,8 +1838,6 @@ def cv_lag_tune(
                                                           key=lambda x: int(x[0].split("_")[1]))]
     best_lag_values = [i for i in range(1, lag_space + 1) if best_lag_indexes[i-1]==1]
     return best_lag_values
-
-
 
 #------------------------------------------------------------------------------
 # HMM CV utility function
