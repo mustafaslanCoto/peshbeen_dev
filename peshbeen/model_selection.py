@@ -1168,6 +1168,105 @@ def tune_ets(data, param_space, cv_splits, horizon, eval_metric, eval_num, step_
                   if not (k == "damping_trend" and model_params.get("damped_trend") is False)}
     return model_params, fit_params
 
+def cv_hmm_lag_tune(
+    model,
+    df,
+    cv_split,
+    test_size,
+    eval_metric,
+    lag_space=None,
+    step_size=None,
+    opt_horizon=None,
+    eval_num=100,
+    verbose=False,
+):
+    """
+    Tune forecasting model hyperparameters using cross-validation and Bayesian optimization.
+
+    Parameters
+    ----------
+    model : object
+        Forecasting model object with .fit and .forecast methods and relevant attributes.
+    df : pd.DataFrame
+        Time series dataframe.
+    cv_split : int
+        Number of time series splits.
+    test_size : int
+        Size of test window for each split.
+    lag_space : dict
+        Hyperopt lag search space.
+    eval_metric : callable
+        Evaluation metric function.
+    step_size : int, optional
+        Step size for moving the window. Defaults to None (equal to test_size).
+    opt_horizon : int, optional
+        Evaluate only on last N points of each split. Defaults to None (all points).
+    eval_num : int, optional
+        Number of hyperopt evaluations. Defaults to 100.
+    verbose : bool, optional
+        Print progress. Defaults to False.
+
+    Returns
+    -------
+    dict
+        Best hyperparameter values found.
+    """
+    tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
+    lag_space = {f"lag_{i}": hp.choice(f"lag_{i}", [0, 1]) for i in range(1, lag_space + 1)}
+    def objective(lag_space):
+
+        selected_lags = [i for i in range(1, lag_space+1) if lag_space[f"lag_{i}"] == 1]
+        model_ = model.copy()
+        model_.lags = selected_lags
+
+                # Optional: penalize too few lags
+        if len(selected_lags) < 1:
+            return {"loss": 1e6, "status": STATUS_OK}
+
+        metrics = []
+        for idx, (train_index, test_index) in enumerate(tscv.split(df)):
+            train, test = df.iloc[train_index], df.iloc[test_index]
+            x_test = test.drop(columns=[model.target_col])
+            y_test = np.array(test[model.target_col])
+            if idx == 0:
+                model_.fit_em(train)
+            else:
+                model_.fit(train)
+            
+            y_pred = model_.forecast(len(y_test), x_test)
+
+            #Evaluate using the specified metric
+            if eval_metric.__name__ == "MASE":
+                score = eval_metric(y_test[-opt_horizon:] if opt_horizon else y_test,
+                                    y_pred[-opt_horizon:] if opt_horizon else y_pred,
+                                    train[model.target_col])
+            else:
+                score = eval_metric(
+                        y_test[-opt_horizon:] if opt_horizon else y_test,
+                        y_pred[-opt_horizon:] if opt_horizon else y_pred,
+                    )
+            metrics.append(score)
+
+        mean_score = np.mean(metrics)
+        if verbose:
+            print("Score:", mean_score)
+        return {"loss": mean_score, "status": STATUS_OK}
+
+    trials = Trials()
+    best_hyperparams = fmin(
+        fn=objective,
+        space=lag_space,
+        algo=tpe.suggest,
+        max_evals=eval_num,
+        trials=trials,
+    )
+
+    # Extract and sort lag values
+    best_lag_indexes = [value for key, value in sorted(((k, v) for k, v in best_hyperparams.items() if k.startswith("lag_")),
+                                                          key=lambda x: int(x[0].split("_")[1]))]
+    best_lag_values = [i for i in range(1, lag_space + 1) if best_lag_indexes[i-1]==1]
+    return best_lag_values
+
 #------------------------------------------------------------------------------
 # SARIMA Model Tuning
 #------------------------------------------------------------------------------
@@ -1394,7 +1493,7 @@ def cv_tune(
             model_params = _get_model_params_for_fit(params)
 
         if lag_space is not None:
-            selected_lags = [i for i in range(1, 61) if params[f"lag_{i}"] == 1]
+            selected_lags = [i for i in range(1, lag_space+1) if params[f"lag_{i}"] == 1]
             model.n_lag = selected_lags
 
                 # Optional: penalize too few lags
@@ -1640,6 +1739,104 @@ def mv_cv_tune(
     ]
 
     return space_eval(param_space, best_hyperparams)
+
+def cv_lag_tune(
+    model,
+    df,
+    cv_split,
+    test_size,
+    eval_metric,
+    lag_space=None,
+    step_size=None,
+    opt_horizon=None,
+    eval_num=100,
+    verbose=False,
+):
+    """
+    Tune forecasting model hyperparameters using cross-validation and Bayesian optimization.
+
+    Parameters
+    ----------
+    model : object
+        Forecasting model object with .fit and .forecast methods and relevant attributes.
+    df : pd.DataFrame
+        Time series dataframe.
+    cv_split : int
+        Number of time series splits.
+    test_size : int
+        Size of test window for each split.
+    lag_space : dict
+        Hyperopt lag search space.
+    eval_metric : callable
+        Evaluation metric function.
+    step_size : int, optional
+        Step size for moving the window. Defaults to None (equal to test_size).
+    opt_horizon : int, optional
+        Evaluate only on last N points of each split. Defaults to None (all points).
+    eval_num : int, optional
+        Number of hyperopt evaluations. Defaults to 100.
+    verbose : bool, optional
+        Print progress. Defaults to False.
+
+    Returns
+    -------
+    dict
+        Best hyperparameter values found.
+    """
+    tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
+    lag_space = {f"lag_{i}": hp.choice(f"lag_{i}", [0, 1]) for i in range(1, lag_space + 1)}
+    def objective(lag_space):
+
+        selected_lags = [i for i in range(1, lag_space+1) if lag_space[f"lag_{i}"] == 1]
+        model_ = model.copy()
+        model_.n_lag = selected_lags
+
+                # Optional: penalize too few lags
+        if len(selected_lags) < 1:
+            return {"loss": 1e6, "status": STATUS_OK}
+
+        metrics = []
+        for train_index, test_index in tscv.split(df):
+            train, test = df.iloc[train_index], df.iloc[test_index]
+            x_test = test.drop(columns=[model.target_col])
+            y_test = np.array(test[model.target_col])
+            model_.fit(train)
+
+            y_pred = model_.forecast(len(y_test), x_test)
+
+            #Evaluate using the specified metric
+            if eval_metric.__name__ == "MASE":
+                score = eval_metric(y_test[-opt_horizon:] if opt_horizon else y_test,
+                                    y_pred[-opt_horizon:] if opt_horizon else y_pred,
+                                    train[model.target_col])
+            else:
+                score = eval_metric(
+                        y_test[-opt_horizon:] if opt_horizon else y_test,
+                        y_pred[-opt_horizon:] if opt_horizon else y_pred,
+                    )
+            metrics.append(score)
+
+        mean_score = np.mean(metrics)
+        if verbose:
+            print("Score:", mean_score)
+        return {"loss": mean_score, "status": STATUS_OK}
+
+    trials = Trials()
+    best_hyperparams = fmin(
+        fn=objective,
+        space=lag_space,
+        algo=tpe.suggest,
+        max_evals=eval_num,
+        trials=trials,
+    )
+
+    # Extract and sort lag values
+    best_lag_indexes = [value for key, value in sorted(((k, v) for k, v in best_hyperparams.items() if k.startswith("lag_")),
+                                                          key=lambda x: int(x[0].split("_")[1]))]
+    best_lag_values = [i for i in range(1, lag_space + 1) if best_lag_indexes[i-1]==1]
+    return best_lag_values
+
+
 
 #------------------------------------------------------------------------------
 # HMM CV utility function
