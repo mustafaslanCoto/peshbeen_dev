@@ -671,9 +671,10 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
 
             model.A = candidate['model'].A
             model.stds = candidate['model'].stds
+            model.LL = candidate['model'].LL
 
             if verbose:
-                print(f"Added {candidate['type']}: {candidate['name']} with score: {best_score}")
+                print(f"Added {candidate['type']}: {candidate['name']} with score: {best_score} and loglik and BIC: {model.LL}, {model.BIC}")
         else:
             break  # No improvement
 
@@ -840,9 +841,10 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
                     model.lag_transform = None
             model.A = candidate['model'].A
             model.stds = candidate['model'].stds
+            model.LL = candidate['model'].LL
 
             if verbose:
-                print(f"Added {candidate['type']}: {candidate['name']} with score: {best_score}")
+                print(f"Removed {candidate['type']}: {candidate['name']} with score: {best_score} and loglik and BIC: {model.LL}, {model.BIC}")
         else:
             break  # No improvement
 
@@ -1033,9 +1035,10 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
 
             model.A = candidate['model'].A
             model.covs = candidate['model'].covs
+            model.LL = candidate['model'].LL
 
             if verbose:
-                print(f"Added {candidate['type']}: {candidate['name']} with score: {best_score}")
+                print(f"Added {candidate['type']}: {candidate['name']} with score: {best_score} and loglik and BIC: {model.LL}, {model.BIC}")
         else:
             break  # No improvement
 
@@ -1213,9 +1216,10 @@ def hmm_mv_backward_feature_selection(df, target_col, n_folds = None, H = None, 
 
             model.A = candidate['model'].A
             model.covs = candidate['model'].covs
+            model.LL = candidate['model'].LL
 
             if verbose:
-                print(f"Added {candidate['type']}: {candidate['name']} with score: {best_score}")
+                print(f"Removed {candidate['type']}: {candidate['name']} with score: {best_score} and loglik and BIC: {model.LL}, {model.BIC}")
         else:
             break  # No improvement
 
