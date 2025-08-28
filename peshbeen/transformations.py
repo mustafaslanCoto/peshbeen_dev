@@ -340,7 +340,7 @@ class rolling_quantile:
         min_samples (int): Minimum number of samples required to compute the quantile.
     """
 
-    def __init__(self, window_size, quantile, shift=1, min_samples=3):
+    def __init__(self, window_size, quantile, shift=1, min_samples=1):
         self.shift = shift
         self.window_size = window_size
         self.quantile = quantile
@@ -366,7 +366,7 @@ class rolling_std:
         min_samples (int): Minimum number of samples required to compute the std.
     """
 
-    def __init__(self, window_size, shift=1, min_samples=3):
+    def __init__(self, window_size, shift=1, min_samples=1):
         self.shift = shift
         self.window_size = window_size
         self.min_samples = min_samples
