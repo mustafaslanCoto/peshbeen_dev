@@ -674,7 +674,6 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
 
             if verbose:
                 print(f"Added {candidate['type']}: {candidate['name']} with score: {best_score}")
-                print(f"Update_transition_probs_and_stds: {model.A}, {model.stds}")
         else:
             break  # No improvement
 
