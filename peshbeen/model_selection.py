@@ -570,6 +570,8 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
 
 # After each feature selection step iterate model to make sure parameters are updated like transition probabilities and stds
     def model_update(model_test, df_test, iterations=iterations, tol=tol):
+        model_test.data_prep(df_test) # update data preparation because if new lags to be consistent with coefficients
+        model_test.compute_coeffs() # update model coefficients because of new lags
         prev_ll = model_test.LL
         for _ in range(iterations):
             model_test.fit(df_test)
@@ -615,9 +617,6 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
                 current_lags = sorted(best_features["best_lags"] + [lag])
                 model_test = model.copy()
                 model_test.lags = current_lags
-                model_test.data_prep(df)
-                model_test.compute_coeffs()
-                # model_test.fit(df)
                 model_test = model_update(model_test, df)
                 score = validation(model_test, df)
                 if is_elementwise_improvement(score, scores):
@@ -631,8 +630,6 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
                 df_test = df.copy()
                 df_test[feat] = df_orig[feat]
                 model_test = model.copy()
-                model_test.data_prep(df_test)
-                model_test.compute_coeffs()
                 model_test = model_update(model_test, df_test)
                 score = validation(model_test, df_test)
                 if is_elementwise_improvement(score, scores):
@@ -646,8 +643,6 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
                 model_test = model.copy()
                 lag_transform = (model_test.lag_transform or []) + [trans]
                 model_test.lag_transform = lag_transform
-                model_test.data_prep(df)
-                model_test.compute_coeffs()
                 model_test = model_update(model_test, df)
                 score = validation(model_test, df)
                 if is_elementwise_improvement(score, scores):
@@ -689,9 +684,7 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
         model_.lags = best_features["best_lags"]
     if transformations is not None and best_features["best_transforms"]:
         model_.lag_transform = best_features["best_transforms"]
-    model_.data_prep(df)
-    model_.compute_coeffs()
-    model_.fit(df)
+    model_ = model_update(model_, df)
 
 
     if transformations is not None and best_features["best_transforms"]:
@@ -757,6 +750,8 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
         
 # After each feature selection step iterate model to make sure parameters are updated like transition probabilities and stds
     def model_update(model_test, df_test, iterations=iterations, tol=tol):
+        model_test.data_prep(df_test) # update data preparation because if new lags to be consistent with coefficients
+        model_test.compute_coeffs() # update model coefficients because of new lags
         prev_ll = model_test.LL
         for _ in range(iterations):
             model_test.fit(df_test)
@@ -801,39 +796,33 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
                 lags_to_test.sort()
                 model_test = model.copy()
                 model_test.lags = lags_to_test
-                model_test.data_prep(df) # update data preparation because if new lags to be consistent with coefficients
-                model_test.compute_coeffs() # update model coefficients because of new lags
                 model_test = model_update(model_test, df)
                 score = validation(model_test, df)
                 if is_elementwise_improvement(score, scores):
                     scores = score
-                    candidate = {'type': 'lag', 'name': lg}
+                    candidate = {'type': 'lag', 'name': lg, 'model': model_test}
                     improvement = True
         if best_features["best_transforms"]:
             for trans in best_features["best_transforms"]:
                 trans_to_test = [x for x in best_features["best_transforms"] if x != trans]
                 model_test = model.copy()
                 model_test.lag_transform = trans_to_test
-                model_test.data_prep(df) # update data preparation because if new lags to be consistent with coefficients
-                model_test.compute_coeffs() # update model coefficients because of new lags
                 model_test = model_update(model_test, df)
                 score = validation(model_test, df)
                 if is_elementwise_improvement(score, scores):
                     scores = score
-                    candidate = {'type': 'transform', 'name': trans}
+                    candidate = {'type': 'transform', 'name': trans, 'model': model_test}
                     improvement = True
         if best_features["best_exogs"]:
             for feat in best_features["best_exogs"]:
                 # feat_to_test = [x for x in candidate_features if x != feat]
                 df_test = df.drop(columns=feat)
                 model_test = model.copy()
-                model_test.data_prep(df_test) # update data preparation because if new lags to be consistent with coefficients
-                model_test.compute_coeffs() # update model coefficients because of new lags
                 model_test = model_update(model_test, df_test)
                 score = validation(model_test, df_test)
                 if is_elementwise_improvement(score, scores):
                     scores = score
-                    candidate = {'type': 'exog', 'name': feat}
+                    candidate = {'type': 'exog', 'name': feat, 'model': model_test}
                     improvement = True
 
         # Update best features
@@ -850,6 +839,8 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
                     model.lag_transform = best_features["best_transforms"]
                 else:
                     model.lag_transform = None
+            model.A = candidate['model'].A
+            model.stds = candidate['model'].stds
 
             if verbose:
                 print(f"Added {candidate['type']}: {candidate['name']} with score: {best_score}")
@@ -862,9 +853,7 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
             model_.lags = best_features["best_lags"]
         if transformations is not None and best_features["best_transforms"]:
             model_.lag_transform = best_features["best_transforms"]
-        model_.data_prep(df)
-        model_.compute_coeffs()
-        model_.fit(df)
+        model_ = model_update(model_, df)
 
 
     if transformations is not None and best_features["best_transforms"]:
@@ -875,7 +864,8 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
 
 def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model = None, metrics = None,
                                   lags_to_consider = None, candidate_features = None, transformations = None, 
-                                    step_size = None, verbose = False):
+                                    step_size = None,
+                                    validation_type = "cv", iterations = 10, tol = 1e-4, verbose = False):
     """
     Performs forward lag selection for Vektor Autoregressive models and bidirectional ml models
     Parameters:
@@ -900,7 +890,7 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
 
     best_features = {"best_lags": {i: [] for i in lags_to_consider if lags_to_consider is not None}, "best_transforms": {i: [] for i in transformations if transformations is not None}, "best_exogs": []}
     remaining_lags = {i:list(range(1, j+1)) for i, j in lags_to_consider.items()}
-    best_score = list(np.repeat(float('inf'), len(metrics)))
+    # best_score = list(np.repeat(float('inf'), len(metrics)))
 
     # Keep original for feature add-back
     df_orig = df.copy()
@@ -912,6 +902,62 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
         model.lag_transform = None # Start with no transformations
     if lags_to_consider is not None:
         model.lags = None # Start with no lags
+
+    if validation_type == "cv":
+        if isinstance(metrics, list):
+            best_score = [float('inf')] * len(metrics)
+        else:
+            best_score = float('inf')
+    elif validation_type in ("BIC", "AIC"):
+        best_score = float('inf')
+    elif validation_type == "AIC_BIC":
+        best_score = [float('inf')] * 2
+    else:
+        raise ValueError("Invalid validation_type. Choose from 'cv', 'BIC', 'AIC', or 'AIC_BIC'.")
+
+    if isinstance(best_score, list):
+        def is_elementwise_improvement(score, best_s):
+            return all(s < b for s, b in zip(score, best_s))
+    else:
+        def is_elementwise_improvement(score, best_s):
+            return score < best_s
+
+# After each feature selection step iterate model to make sure parameters are updated like transition probabilities and stds
+    def model_update(model_test, df_test, iterations=iterations, tol=tol):
+        model_test.data_prep(df_test) # update data preparation because if new lags to be consistent with coefficients
+        model_test.compute_coeffs() # update model coefficients because of new lags
+        prev_ll = model_test.LL
+        for _ in range(iterations):
+            model_test.fit(df_test)
+            ll = model_test.LL
+            if abs(ll - prev_ll) < tol:
+                # print iteration number
+                # print(f"Converged after {_} iterations")
+                break
+            else:
+                prev_ll = ll
+        return model_test
+    
+
+    def validation(model_test, df_test):
+        if validation_type == "cv":
+            cv_result = hmm_mv_cross_validate(model = model_test, df=df_test, cv_split=n_folds, test_size=H,
+                                        metrics = metrics, step_size= step_size)
+    
+            if isinstance(metrics, list):
+                score = cv_result[target_col].tolist()
+            else:
+                score = cv_result[target_col].values[0]
+        elif validation_type == "BIC":
+            score = model_test.BIC
+        elif validation_type == "AIC":
+            score = model_test.AIC
+        elif validation_type == "AIC_BIC":
+            score = [model_test.AIC, model_test.BIC]
+        else:
+            raise ValueError("Invalid validation_type. Choose from 'cv', 'BIC', 'AIC', or 'AIC_BIC'.")
+
+        return score
 
     
     # while max_lag>0:
@@ -928,15 +974,12 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
                     current_lag[k].sort()
                     model_test.lags = current_lag
 
-                    model_test.data_prep(df) # update data preparation because if new lags to be consistent with coefficients
-                    model_test.compute_coeffs() # update model coefficients because of new lags
-                    my_cv = hmm_mv_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
-                                        metrics = metrics, step_size= step_size)
+                    model_test = model_update(model_test, df)
+                    score = validation(model_test, df)
 
-                    score = my_cv[target_col].tolist()
-                    if score < scores:
+                    if is_elementwise_improvement(score, scores):
                         scores = score
-                        candidate = {'target': k, 'type': 'lag', 'name': x}
+                        candidate = {'target': k, 'type': 'lag', 'name': x, 'model': model_test}
                         improvement = True
 
         # Test Exogenous Features
@@ -945,14 +988,12 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
                 df_test = df.copy()
                 df_test[feat] = df_orig[feat]
                 model_test = model.copy()
-                model_test.data_prep(df_test)
-                model_test.compute_coeffs()
-                my_cv = hmm_mv_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
-                                    metrics = metrics, step_size= step_size)
-                score = my_cv[target_col].tolist()
-                if score < scores:
+                model_test = model_update(model_test, df_test)
+                score = validation(model_test, df_test)
+
+                if is_elementwise_improvement(score, scores):
                     scores = score
-                    candidate = {'target': None, 'type': 'exog', 'name': feat}
+                    candidate = {'target': None, 'type': 'exog', 'name': feat, 'model': model_test}
                     improvement = True
 
             # Test Transformations
@@ -962,15 +1003,11 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
                     model_test = model.copy()
                     lag_transform = (model_test.lag_transform[k] or []) + [t]
                     model_test.lag_transform[k] = lag_transform
-
-                    model_test.data_prep(df)
-                    model_test.compute_coeffs()
-                    cv_result = hmm_mv_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
-                                        metrics = metrics, step_size= step_size)
-                    score = cv_result[target_col].tolist()
-                    if score < scores:
+                    model_test = model_update(model_test, df)
+                    score = validation(model_test, df)
+                    if is_elementwise_improvement(score, scores):
                         scores = score
-                        candidate = {'target': k, 'type': 'transform', 'name': t}
+                        candidate = {'target': k, 'type': 'transform', 'name': t, 'model': model_test}
                         improvement = True
 
         # Update best features
@@ -995,11 +1032,9 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
                     else:
                         model.lag_transform[candidate['target']].append(candidate['name'])
 
-                # if any(transformations[key] for key in transformations):
-                #     transformations = {k: v for k, v in transformations.items() if not len(v) == 0}
-                #     model.lag_transform = transformations
-                # else:
-                #     model.lag_transform = None
+            model.A = candidate['model'].A
+            model.covs = candidate['model'].covs
+
             if verbose:
                 print(f"Added {candidate['type']}: {candidate['name']} with score: {best_score}")
         else:
@@ -1011,8 +1046,8 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
         model_.lags = best_features["best_lags"]
     if transformations is not None and best_features["best_transforms"]:
         model_.lag_transform = best_features["best_transforms"]
-    model_.data_prep(df)
-    model_.compute_coeffs()
+
+    model_ = model_update(model_, df)
 
 
     if transformations is not None:
@@ -1025,7 +1060,8 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
 
 def hmm_mv_backward_feature_selection(df, target_col, n_folds = None, H = None, model = None, metrics = None,
                                   lags_to_consider = None, candidate_features = None, transformations = None, 
-                                    step_size = None, verbose = False):
+                                    step_size = None, validation_type = "cv", iterations = 10, tol = 1e-4, 
+                                    verbose = False):
     """
     Performs backward lag selection for Regression models.
     Parameters:
@@ -1056,7 +1092,63 @@ def hmm_mv_backward_feature_selection(df, target_col, n_folds = None, H = None, 
     if transformations is not None:
         model.lag_transform = best_features["best_transforms"]
     # exogenous variables should be in df before passing df
-    best_score = list(np.repeat(float('inf'), len(metrics)))
+
+    if validation_type == "cv":
+        if isinstance(metrics, list):
+            best_score = [float('inf')] * len(metrics)
+        else:
+            best_score = float('inf')
+    elif validation_type in ("BIC", "AIC"):
+        best_score = float('inf')
+    elif validation_type == "AIC_BIC":
+        best_score = [float('inf')] * 2
+    else:
+        raise ValueError("Invalid validation_type. Choose from 'cv', 'BIC', 'AIC', or 'AIC_BIC'.")
+
+    if isinstance(best_score, list):
+        def is_elementwise_improvement(score, best_s):
+            return all(s < b for s, b in zip(score, best_s))
+    else:
+        def is_elementwise_improvement(score, best_s):
+            return score < best_s
+
+# After each feature selection step iterate model to make sure parameters are updated like transition probabilities and stds
+    def model_update(model_test, df_test, iterations=iterations, tol=tol):
+        model_test.data_prep(df_test) # update data preparation because if new lags to be consistent with coefficients
+        model_test.compute_coeffs() # update model coefficients because of new lags
+        prev_ll = model_test.LL
+        for _ in range(iterations):
+            model_test.fit(df_test)
+            ll = model_test.LL
+            if abs(ll - prev_ll) < tol:
+                # print iteration number
+                # print(f"Converged after {_} iterations")
+                break
+            else:
+                prev_ll = ll
+        return model_test
+    
+
+    def validation(model_test, df_test):
+        if validation_type == "cv":
+            cv_result = hmm_mv_cross_validate(model = model_test, df=df_test, cv_split=n_folds, test_size=H,
+                                        metrics = metrics, step_size= step_size)
+    
+            if isinstance(metrics, list):
+                score = cv_result[target_col].tolist()
+            else:
+                score = cv_result[target_col].values[0]
+        elif validation_type == "BIC":
+            score = model_test.BIC
+        elif validation_type == "AIC":
+            score = model_test.AIC
+        elif validation_type == "AIC_BIC":
+            score = [model_test.AIC, model_test.BIC]
+        else:
+            raise ValueError("Invalid validation_type. Choose from 'cv', 'BIC', 'AIC', or 'AIC_BIC'.")
+
+        return score
+
     
     while True:
         improvement = False
@@ -1072,15 +1164,11 @@ def hmm_mv_backward_feature_selection(df, target_col, n_folds = None, H = None, 
                     model_test = model.copy()
                     model_test.lags = lags_to_test
 
-                    # model_test.lag_transform = transformations # only to test lags excluded
-                    model_test.data_prep(df) # update data preparation because if new lags to be consistent with coefficients
-                    model_test.compute_coeffs() # update model coefficients because of new lags
-                    my_cv = hmm_mv_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
-                                        metrics = metrics, step_size= step_size)
-                    score = my_cv[target_col].tolist()
-                    if score < scores:
+                    model_test = model_update(model_test, df)
+                    score = validation(model_test, df)
+                    if is_elementwise_improvement(score, scores):
                         scores = score
-                        candidate = {'target': targ_l, 'type': 'lag', 'name': lg}
+                        candidate = {'target': targ_l, 'type': 'lag', 'name': lg, 'model': model_test}
                         improvement = True
         if transformations is not None:
             for targ_t, trans in best_features["best_transforms"].items():
@@ -1090,28 +1178,22 @@ def hmm_mv_backward_feature_selection(df, target_col, n_folds = None, H = None, 
                     model_test = model.copy()
                     # model_test.lags = remaining_lags
                     model_test.lag_transform = trans_to_test
-                    model_test.data_prep(df) # update data preparation because if new lags to be consistent with coefficients
-                    model_test.compute_coeffs() # update model coefficients because of new lags
-                    my_cv = hmm_mv_cross_validate(model = model_test, df=df, cv_split=n_folds, test_size=H,
-                                        metrics = metrics, step_size= step_size)
-                    score = my_cv[target_col].tolist()
-                    if score < scores:
+                    model_test = model_update(model_test, df)
+                    score = validation(model_test, df)
+                    if is_elementwise_improvement(score, scores):
                         scores = score
-                        candidate = {'target': targ_t, 'type': 'transform', 'name': trans}
+                        candidate = {'target': targ_t, 'type': 'transform', 'name': trans, 'model': model_test}
                         improvement = True
         if candidate_features is not None:
             for feat in best_features["best_exogs"]:
                 # feat_to_test = [x for x in candidate_features if x != feat]
                 df_test = df.drop(columns=feat)
                 model_test = model.copy()
-                model_test.data_prep(df_test) # update data preparation because if new lags to be consistent with coefficients
-                model_test.compute_coeffs() # update model coefficients because of new lags
-                my_cv = hmm_mv_cross_validate(model = model_test, df=df_test, cv_split=n_folds, test_size=H,
-                                metrics = metrics, step_size= step_size)
-                score = my_cv[target_col].tolist()
-                if score < scores:
+                model_test = model_update(model_test, df_test)
+                score = validation(model_test, df_test)
+                if is_elementwise_improvement(score, scores):
                     scores = score
-                    candidate = {'target': None, 'type': 'exog', 'name': feat}
+                    candidate = {'target': None, 'type': 'exog', 'name': feat, 'model': model_test}
                     improvement = True
 
         # Update best features
@@ -1130,6 +1212,9 @@ def hmm_mv_backward_feature_selection(df, target_col, n_folds = None, H = None, 
                 else:
                     model.lag_transform = None
 
+            model.A = candidate['model'].A
+            model.covs = candidate['model'].covs
+
             if verbose:
                 print(f"Added {candidate['type']}: {candidate['name']} with score: {best_score}")
         else:
@@ -1141,8 +1226,8 @@ def hmm_mv_backward_feature_selection(df, target_col, n_folds = None, H = None, 
         model_.lags = best_features["best_lags"]
     if transformations is not None and best_features["best_transforms"]:
         model_.lag_transform = best_features["best_transforms"]
-    model_.data_prep(df)
-    model_.compute_coeffs()
+
+    model_ = model_update(model_, df)
 
     # if transformations is not None and at least one key is not empty get their names
     if transformations is not None:
