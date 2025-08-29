@@ -16,6 +16,7 @@ from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statistics import NormalDist
 import warnings
 warnings.filterwarnings("ignore")
+from statsmodels.tsa.stattools import pacf
 
 #------------------------------------------------------------------------------
 # Unit Root Test and Serial Correlation Check
@@ -118,3 +119,39 @@ def cross_autocorrelation(x, y, nlags, adjusted=True, alpha=None, bartlett_confi
         return cc, confint
     else:
         return cc, None 
+    
+
+
+def pacf_exceedance(series, alpha=0.05, n_lags=5, adjusted=True):
+    """
+    Calculate the exceedance scores for the partial autocorrelation function (PACF) of a time series to identify powerful significant lags.
+    It is calculated as (PACF value - bound) / bound for positive exceedances and (PACF value + bound) / bound for negative exceedances.
+
+    Parameters:
+    - series: The input time series data.
+    - alpha: Significance level for the confidence intervals.
+    - n_lags: Number of lags to consider for the PACF.
+    - adjusted: Whether to use an adjusted bound for the PACF.
+
+    Returns:
+    - A DataFrame containing the exceedance scores for each lag. Also includes the absolute scores
+    """
+    pacf_vals = pacf(series, nlags=n_lags)[1:]
+    n= len(series)   
+    z = NormalDist().inv_cdf(1 - alpha/2)
+    bound = z / np.sqrt(n - n_lags) if adjusted else z / np.sqrt(n)
+    exceed_score = {}
+    for i, j in enumerate(pacf_vals):
+        if j > bound:
+            exceed_score[i+1] = (j-bound)/bound
+        elif j < -bound:
+            exceed_score[i+1] = (j+bound)/bound
+        else:
+            exceed_score[i+1] = 0
+    exceed_score = pd.DataFrame(exceed_score, index=[0]).T
+    exceed_score.columns = ["exceedance_score"]
+    exceed_score["abs_score"] = exceed_score["exceedance_score"].abs()
+    exceed_score = exceed_score.sort_values(by="abs_score", ascending=False)
+    exceed_score = exceed_score[exceed_score["abs_score"] > 0]
+    exceed_score.index.name = "lag"
+    return exceed_score
