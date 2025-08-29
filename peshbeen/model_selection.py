@@ -548,11 +548,9 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
             remaining_lags = [x for x in remaining_lags if x not in start_lag]
 
     if candidate_features is not None:
-        candidate_features = candidate_features.copy()
         df = df.drop(columns=candidate_features)
         df_orig = df.copy() # Keep original for feature add-ba
     if transformations is not None:
-        transformations = transformations.copy()
         if start_transform is not None:
             if not isinstance(start_transform, list):
                 raise ValueError("start_transform should be a list of transformation instances.")
@@ -882,7 +880,7 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
 
 def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model = None, metrics = None,
                                   lags_to_consider = None, candidate_features = None, transformations = None, 
-                                    step_size = None,
+                                    step_size = None, starting_lag = None, starting_transform = None,
                                     validation_type = "cv", iterations = 10, tol = 1e-4, verbose = False):
     """
     Performs forward lag selection for Vektor Autoregressive models and bidirectional ml models
@@ -908,7 +906,14 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
 
     best_features = {"best_lags": {i: [] for i in lags_to_consider if lags_to_consider is not None}, "best_transforms": {i: [] for i in transformations if transformations is not None}, "best_exogs": []}
     remaining_lags = {i:list(range(1, j+1)) for i, j in lags_to_consider.items()}
-    # best_score = list(np.repeat(float('inf'), len(metrics)))
+    if starting_lag is not None:
+        for k, v in starting_lag.items():
+            all_lags = remaining_lags[k]
+            remaining_lags[k] = [x for x in all_lags if x not in v]
+            best_features["best_lags"][k].extend(v)
+
+    if lags_to_consider is not None:
+        model.lags = None # Start with no lags
 
     # Keep original for feature add-back
     df_orig = df.copy()
@@ -917,9 +922,14 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
     if candidate_features:
         df = df.drop(columns=candidate_features) # Drop candidate features to start with feature selection
     if transformations is not None:
-        model.lag_transform = None # Start with no transformations
-    if lags_to_consider is not None:
-        model.lags = None # Start with no lags
+        if starting_transform is not None:
+            for k, v in starting_transform.items():
+                transformations[k] = [x for x in transformations if x not in v]
+                best_features["best_transforms"][k].extend(v)
+            model.lag_transform = starting_transform
+        else:
+            model.lag_transform = None # Start with no transformations
+
 
     if validation_type == "cv":
         if isinstance(metrics, list):
