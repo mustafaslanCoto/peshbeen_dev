@@ -21,10 +21,11 @@ warnings.filterwarnings("ignore")
 #------------------------------------------------------------------------------
 # Feature Selection Algorithms
 # ------------------------------------------------------------------------------
+            
 
 def forward_feature_selection(df, n_folds = None, H = None, model = None, metrics = None,
                                   lags_to_consider = None, candidate_features = None, transformations = None, 
-                                    step_size = None, verbose = False):
+                                    step_size = None, starting_lags = None, starting_transforms = None, verbose = False):
     """
     Performs forward lag/feature/transform selection for Regression models.
     Parameters:
@@ -36,6 +37,8 @@ def forward_feature_selection(df, n_folds = None, H = None, model = None, metric
         lags_to_consider (list, optional): List of lags to consider for feature selection.
         candidate_features (list, optional): List of candidate exogenous features.
         transformations (list, optional): List of transformations to apply.
+        starting_lags (list, optional): List of starting lags.
+        starting_transforms (list, optional): List of starting transformations.
         step_size (int, optional): Step size for rolling window.
         verbose (bool, optional): Whether to print progress messages.
     Returns:
@@ -46,15 +49,54 @@ def forward_feature_selection(df, n_folds = None, H = None, model = None, metric
     if lags_to_consider is not None:
         remaining_lags = list(range(1, lags_to_consider + 1))
         model.n_lag = None # Start with no lags
+
+        if starting_lags is not None:
+            if not isinstance(starting_lags, list):
+                raise ValueError("starting_lags should be a list of integers.")
+            model.lags = starting_lags
+            remaining_lags = [x for x in remaining_lags if x not in starting_lags]
+
     if candidate_features is not None:
         candidate_features = candidate_features.copy()
         df = df.drop(columns=candidate_features)
         df_orig = df.copy() # Keep original for feature add-back
+
     if transformations is not None:
-        transformations = transformations.copy()
-        model.lag_transform = None # Start with no transformations
-    best_features = {"best_lags": [], "best_exogs": [], "best_transforms": []}
+        if starting_transforms is not None:
+            if not isinstance(starting_transforms, list):
+                raise ValueError("starting_transforms should be a list of transformation instances.")
+            model.lag_transform = starting_transforms
+            transformations = [x for x in transformations if x not in starting_transforms]
+        else:
+            model.lag_transform = None
+            
+
+    best_features = {
+    "best_lags": list(starting_lags) if starting_lags is not None else [],
+    "best_exogs": [],
+    "best_transforms": list(starting_transforms) if starting_transforms is not None else []}
     best_score = [float('inf')] * len(metrics)
+
+    if isinstance(metrics, list):
+        best_score = [float('inf')] * len(metrics)
+    else:
+        best_score = float('inf')
+
+    if isinstance(best_score, list):
+        def is_elementwise_improvement(score, best_s):
+            return all(s < b for s, b in zip(score, best_s))
+    else:
+        def is_elementwise_improvement(score, best_s):
+            return score < best_s
+        
+    def validation(model_test, df_test):    
+        cv_result = cross_validate(model=model_test, df=df_test, cv_split=n_folds,
+                            test_size=H, metrics=metrics, step_size=step_size)
+
+        if isinstance(metrics, list):
+            return cv_result["score"].tolist()
+        else:
+            return cv_result["score"].values[0]
 
     while True:
         improvement = False
@@ -67,11 +109,9 @@ def forward_feature_selection(df, n_folds = None, H = None, model = None, metric
                 current_lags = sorted(best_features["best_lags"] + [lag])
                 model_test = model.copy()
                 model_test.n_lag = current_lags
-                my_cv = cross_validate(model=model_test, df=df, cv_split=n_folds,
-                                       test_size=H, metrics=metrics, step_size=step_size)
-                score = my_cv["score"].tolist()
+                score = validation(model_test, df)
                 # print(f'testing lag: {lag} with score: {score}')
-                if score < scores:
+                if  is_elementwise_improvement(score, scores):
                     scores = score
                     candidate = {'type': 'lag', 'name': lag}
                     # print(candidate["type"], candidate["name"], score)
@@ -83,10 +123,8 @@ def forward_feature_selection(df, n_folds = None, H = None, model = None, metric
                 df_test = df.copy()
                 df_test[feat] = df_orig[feat]
                 model_test = model.copy()
-                my_cv = cross_validate(model=model_test, df=df_test, cv_split=n_folds,
-                                       test_size=H, metrics=metrics, step_size=step_size)
-                score = my_cv["score"].tolist()
-                if score < scores:
+                score = validation(model_test, df_test)
+                if is_elementwise_improvement(score, scores):
                     scores = score
                     candidate = {'type': 'exog', 'name': feat}
                     improvement = True
@@ -97,11 +135,9 @@ def forward_feature_selection(df, n_folds = None, H = None, model = None, metric
                 model_test = model.copy()
                 lag_transform = (model_test.lag_transform or []) + [trans]
                 model_test.lag_transform = lag_transform
-                my_cv = cross_validate(model=model_test, df=df, cv_split=n_folds,
-                                       test_size=H, metrics=metrics, step_size=step_size)
-                score = my_cv["score"].tolist()
+                score = validation(model_test, df)
                 # print(f'testing transformation: {trans.get_name()} with score: {score}')
-                if score < scores:
+                if is_elementwise_improvement(score, scores):
                     scores = score
                     candidate = {'type': 'transform', 'name': trans}
                     # print(candidate["type"], candidate["name"].get_name(), score)
@@ -252,7 +288,7 @@ def backward_feature_selection(df, n_folds = None, H = None, model = None, metri
 
 def mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model = None, metrics = None,
                                   lags_to_consider = None, candidate_features = None, transformations = None, 
-                                    step_size = None, verbose = False):
+                                    step_size = None, starting_lags = None, starting_transforms = None, verbose = False):
     """
     Performs forward lag selection for multivariate models 
     Parameters:
@@ -266,6 +302,8 @@ def mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model
         candidate_features (list): List of candidate exogenous features.
         transformations (list): List of transformations to consider.
         step_size (int, optional): Step size for lag selection. Defaults to None.
+        starting_lags (dict, optional): Dictionary of starting lags for each variable. Defaults to None.
+        starting_transforms (dict, optional): Dictionary of starting transformations for each variable. Defaults to None.
         verbose (bool, optional): Whether to print progress. Defaults to False.
     Returns:
         dict: Dictionary of best features for each variable.
@@ -277,18 +315,49 @@ def mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model
 
     best_features = {"best_lags": {i: [] for i in lags_to_consider if lags_to_consider is not None}, "best_transforms": {i: [] for i in transformations if transformations is not None}, "best_exogs": []}
     remaining_lags = {i:list(range(1, j+1)) for i, j in lags_to_consider.items()}
-    best_score = list(np.repeat(float('inf'), len(metrics)))
 
-    # Keep original for feature add-back
-    df_orig = df.copy()
+    if starting_lags is not None:
+        for k, v in starting_lags.items():
+            all_lags = remaining_lags[k]
+            remaining_lags[k] = [x for x in all_lags if x not in v]
+            best_features["best_lags"][k].extend(v)
+        
+    if lags_to_consider is not None:
+        model.n_lag = None # Start with no lags
 
     # Drop candidate features initially
     if candidate_features:
         df = df.drop(columns=candidate_features) # Drop candidate features to start with feature selection
+        df_orig = df.copy() # Keep original for feature add-back
     if transformations is not None:
-        model.lag_transform = None # Start with no transformations
-    if lags_to_consider is not None:
-        model.n_lag = None # Start with no lags
+        if starting_transforms is not None:
+            for k, v in starting_transforms.items():
+                transformations[k] = [x for x in transformations if x not in v]
+                best_features["best_transforms"][k].extend(v)
+            model.lag_transform = starting_transforms
+        else:
+            model.lag_transform = None # Start with no transformations
+
+    if isinstance(metrics, list):
+        best_score = [float('inf')] * len(metrics)
+    else:
+        best_score = float('inf')
+
+    if isinstance(best_score, list):
+        def is_elementwise_improvement(score, best_s):
+            return all(s < b for s, b in zip(score, best_s))
+    else:
+        def is_elementwise_improvement(score, best_s):
+            return score < best_s
+
+    def validation(model_test, df_test):
+        cv_result = mv_cross_validate(model=model_test, df=df_test, cv_split=n_folds,
+                                            test_size=H, metrics=metrics, step_size=step_size)
+    
+        if isinstance(metrics, list):
+            return cv_result[target_col].tolist()
+        else:
+            return cv_result[target_col].values[0]
 
     # while max_lag>0:
     while True:
@@ -303,11 +372,8 @@ def mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model
                     current_lag[k] = best_features['best_lags'][k] + [x]
                     current_lag[k].sort()
                     model_test.n_lag = current_lag
-                    my_cv = mv_cross_validate(model=model_test, df=df, cv_split=n_folds,
-                                                         test_size=H, metrics=metrics, step_size=step_size)
-
-                    score = my_cv[target_col].tolist()
-                    if score < scores:
+                    score = validation(model_test, df)
+                    if is_elementwise_improvement(score, scores):
                         scores = score
                         candidate = {'target': k, 'type': 'lag', 'name': x}
                         improvement = True
@@ -318,10 +384,8 @@ def mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model
                 df_test = df.copy()
                 df_test[feat] = df_orig[feat]
                 model_test = model.copy()
-                my_cv = mv_cross_validate(model=model_test, df=df_test, cv_split=n_folds, test_size=H,
-                                                     metrics=metrics, step_size=step_size)
-                score = my_cv[target_col].tolist()
-                if score < scores:
+                score = validation(model_test, df_test)
+                if is_elementwise_improvement(score, scores):
                     scores = score
                     candidate = {'target': None, 'type': 'exog', 'name': feat}
                     improvement = True
@@ -333,10 +397,8 @@ def mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model
                     model_test = model.copy()
                     lag_transform = (model_test.lag_transform[k] or []) + [t]
                     model_test.lag_transform[k] = lag_transform
-                    my_cv = mv_cross_validate(model=model_test, df=df, cv_split=n_folds,
-                                                         test_size=H, metrics=metrics, step_size=step_size)
-                    score = my_cv[target_col].tolist()
-                    if score < scores:
+                    score = validation(model_test, df)
+                    if is_elementwise_improvement(score, scores):
                         scores = score
                         candidate = {'target': k, 'type': 'transform', 'name': t}
                         improvement = True
@@ -512,7 +574,7 @@ def mv_backward_feature_selection(df, target_col, n_folds = None, H = None, mode
 
 def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, metrics = None,
                                   lags_to_consider = None, candidate_features = None, transformations = None, 
-                                    step_size = None, start_lag = None, start_transform = None,
+                                    step_size = None, starting_lags = None, starting_transforms = None,
                                     validation_type = "cv", iterations = 10, tol = 1e-4, verbose = False):
     """
     Performs forward lag/feature/transform selection for Regression models.
@@ -526,6 +588,8 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
         candidate_features (list, optional): List of candidate exogenous features.
         transformations (list, optional): List of transformations to apply.
         step_size (int, optional): Step size for rolling window.
+        starting_lags (list, optional): List of starting lags.
+        starting_transforms (list, optional): List of starting transformations.
         validation_type (str, optional): Type of validation to use ("cv", "BIC", "AIC" or both "AIC_BIC"). if "AIC_BIC" are both selected, the model will be evaluated using both criteria.
         iterations (int, optional): Number of iterations for model fitting to update parameters.
         tol (float, optional): Tolerance for convergence.
@@ -541,28 +605,28 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
         elif isinstance(lags_to_consider, list):
             remaining_lags = lags_to_consider
         model.lags = None
-        if start_lag is not None:
-            if not isinstance(start_lag, list):
-                raise ValueError("start_lag should be a list of integers.")
-            model.lags = start_lag
-            remaining_lags = [x for x in remaining_lags if x not in start_lag]
+        if starting_lags is not None:
+            if not isinstance(starting_lags, list):
+                raise ValueError("starting_lags should be a list of integers.")
+            model.lags = starting_lags
+            remaining_lags = [x for x in remaining_lags if x not in starting_lags]
 
     if candidate_features is not None:
         df = df.drop(columns=candidate_features)
         df_orig = df.copy() # Keep original for feature add-ba
     if transformations is not None:
-        if start_transform is not None:
-            if not isinstance(start_transform, list):
-                raise ValueError("start_transform should be a list of transformation instances.")
-            model.lag_transform = start_transform
-            transformations = [x for x in transformations if x not in start_transform]
+        if starting_transforms is not None:
+            if not isinstance(starting_transforms, list):
+                raise ValueError("starting_transforms should be a list of transformation instances.")
+            model.lag_transform = starting_transforms
+            transformations = [x for x in transformations if x not in starting_transforms]
         else:
             model.lag_transform = None
             
     best_features = {
-    "best_lags": list(start_lag) if start_lag is not None else [],
+    "best_lags": list(starting_lags) if starting_lags is not None else [],
     "best_exogs": [],
-    "best_transforms": list(start_transform) if start_transform is not None else []}
+    "best_transforms": list(starting_transforms) if starting_transforms is not None else []}
 
     if validation_type == "cv":
         if isinstance(metrics, list):
@@ -880,7 +944,7 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
 
 def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model = None, metrics = None,
                                   lags_to_consider = None, candidate_features = None, transformations = None, 
-                                    step_size = None, starting_lag = None, starting_transform = None,
+                                    step_size = None, starting_lags = None, starting_transforms = None,
                                     validation_type = "cv", iterations = 10, tol = 1e-4, verbose = False):
     """
     Performs forward lag selection for Vektor Autoregressive models and bidirectional ml models
@@ -895,6 +959,8 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
         candidate_features (list): List of candidate exogenous features.
         transformations (list): List of transformations to consider.
         step_size (int, optional): Step size for lag selection. Defaults to None.
+        starting_lags (dict, optional): Dictionary of starting lags for each variable. Defaults to None.
+        starting_transforms (dict, optional): Dictionary of starting transformations for each variable. Defaults to None.
         verbose (bool, optional): Whether to print progress. Defaults to False.
     Returns:
         dict: Dictionary of best features for each variable.
@@ -906,8 +972,8 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
 
     best_features = {"best_lags": {i: [] for i in lags_to_consider if lags_to_consider is not None}, "best_transforms": {i: [] for i in transformations if transformations is not None}, "best_exogs": []}
     remaining_lags = {i:list(range(1, j+1)) for i, j in lags_to_consider.items()}
-    if starting_lag is not None:
-        for k, v in starting_lag.items():
+    if starting_lags is not None:
+        for k, v in starting_lags.items():
             all_lags = remaining_lags[k]
             remaining_lags[k] = [x for x in all_lags if x not in v]
             best_features["best_lags"][k].extend(v)
@@ -922,11 +988,11 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
     if candidate_features:
         df = df.drop(columns=candidate_features) # Drop candidate features to start with feature selection
     if transformations is not None:
-        if starting_transform is not None:
-            for k, v in starting_transform.items():
+        if starting_transforms is not None:
+            for k, v in starting_transforms.items():
                 transformations[k] = [x for x in transformations if x not in v]
                 best_features["best_transforms"][k].extend(v)
-            model.lag_transform = starting_transform
+            model.lag_transform = starting_transforms
         else:
             model.lag_transform = None # Start with no transformations
 
@@ -1643,6 +1709,7 @@ def cv_tune(
     param_space,
     eval_metric,
     lag_space=None,
+    transform_space=None,
     step_size=None,
     opt_horizon=None,
     eval_num=100,
@@ -1663,6 +1730,10 @@ def cv_tune(
         Size of test window for each split.
     param_space : dict
         Hyperopt parameter search space.
+    lag_space : int, optional
+        Maximum number of lags to consider for each variable. Defaults to None (no lag).
+    transform_space : int, optional
+        Possible transformations to consider for each variable. Defaults to None (no transformation).
     eval_metric : callable
         Evaluation metric function.
     step_size : int, optional
@@ -1689,9 +1760,6 @@ def cv_tune(
                 model.n_lag = list(range(1, params["n_lag"] + 1))
             elif isinstance(params["n_lag"], list):
                 model.n_lag = params["n_lag"]
-
-        if "difference" in params:
-            model.difference = params["difference"]
         if "box_cox" in params:
             model.box_cox = params["box_cox"]
         if "box_cox_lmda" in params:
@@ -1701,14 +1769,11 @@ def cv_tune(
 
     def _get_model_params_for_fit(params):
         # Exclude special parameters that should not be passed to the model constructor
-        skip_keys = {
-            "box_cox", "n_lag", "box_cox_lmda", "box_cox_biasadj",
-            "trend", "damped_trend", "seasonal", "seasonal_periods",
-            "smoothing_level", "smoothing_trend", "smoothing_seasonal", "damping_trend",
-            "differencing_number"
-        }
+        skip_keys = {"box_cox", "n_lag", "box_cox_lmda", "box_cox_biasadj"}
         if lag_space is not None:
             skip_keys.update([f"lag_{i}" for i in range(1, lag_space+1)])
+        if transform_space is not None:
+            skip_keys.update([t.get_name() for t in transform_space])
 
         return {k: v for k, v in params.items() if k not in skip_keys}
     
@@ -1717,6 +1782,10 @@ def cv_tune(
         search_space = {**lag_postions, **param_space}
     else:
         search_space = {**param_space}
+
+    if transform_space is not None:
+        transform_positions = {t.get_name(): hp.choice(t.get_name(), [0, 1]) for t in transform_space}
+        search_space = {**transform_positions, **search_space}
 
     def objective(params):
         _set_model_params(params)
@@ -1730,6 +1799,10 @@ def cv_tune(
         if lag_space is not None:
             selected_lags = [i for i in range(1, lag_space+1) if params[f"lag_{i}"] == 1]
             model.n_lag = selected_lags
+
+        if transform_space is not None:
+            selected_transforms = [t for t in transform_space if params[t.get_name()] == 1]
+            model.lag_transform = selected_transforms
 
                 # Optional: penalize too few lags
         if len(selected_lags) < 1:
@@ -1745,7 +1818,7 @@ def cv_tune(
                 model.model.set_params(**model_params)
             model.fit(train)
             
-            y_pred = model.forecast(n_ahead=len(y_test), x_test=x_test)
+            y_pred = model.forecast(len(y_test), x_test)
 
             #Evaluate using the specified metric
             if eval_metric.__name__ == "MASE":
@@ -1779,13 +1852,17 @@ def cv_tune(
     ]
 
     # Extract and sort lag values
+    best_lag_values = []
+    best_transforms = []
     if lag_space is not None:
         best_lag_indexes = [value for key, value in sorted(((k, v) for k, v in best_hyperparams.items() if k.startswith("lag_")),
                                                           key=lambda x: int(x[0].split("_")[1]))]
         best_lag_values = [i for i in range(1, lag_space + 1) if best_lag_indexes[i-1]==1]
-        return space_eval(param_space, best_hyperparams), best_lag_values
-    else:
-        return space_eval(param_space, best_hyperparams)
+    if transform_space is not None:
+        best_transform_orig = [v for v in best_hyperparams.values() if v in transform_space]
+        # get the name of transforms
+        best_transforms = [t.get_name() for t in best_transform_orig]
+    return space_eval(param_space, best_hyperparams), best_lag_values, best_transforms
 
 def mv_cv_tune(
     model,
@@ -1793,8 +1870,10 @@ def mv_cv_tune(
     forecast_col,
     cv_split,
     test_size,
-    param_space,
     eval_metric,
+    param_space,
+    lag_space=None,
+    transform_space=None,
     step_size=None,
     opt_horizon=None,
     eval_num=100,
@@ -1811,6 +1890,8 @@ def mv_cv_tune(
         test_size (int): Size of test window for each split.
         step_size (int): Step size for moving the window. Defaults to None (equal to test_size).
         param_space (dict): Hyperopt parameter search space. params for lags, differencing, etc. can be {'n_lag': (hp.choice('lag_y1', [1,2,3]), hp.choice('lag_y2', [1,2]))}
+        lag_space (dict, optional): Lag hyperparameter search space.
+        transform_space (dict, optional): Transformation hyperparameter search space.
         eval_metric (callable): Evaluation metric function.
         opt_horizon (int, optional): Evaluate only on last N points of each split. Defaults to None (all points).
         eval_num (int, optional): Number of hyperopt evaluations. Defaults to 100.
@@ -1820,31 +1901,9 @@ def mv_cv_tune(
         dict: Best hyperparameter values found.
     """
 
-    target_cols = model.target_cols
+    # target_cols = model.target_cols
     tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
 
-# example: lgb_param_space_bi={'learning_rate': hp.quniform('learning_rate', 0.001, 0.8, 0.0001),
-#             'num_leaves': scope.int(hp.quniform('num_leaves', 10, 200, 1)),
-#            'max_depth':scope.int(hp.quniform('max_depth', 5, 100, 1)),
-
-#     'n_lag': {
-#         'attend': hp.choice('attend_lag', [2,3,[2,3]]),
-#         'verified': hp.choice('verified_lag', [7,4,[3,4]])
-#     },
-#     'trend': {
-#         'attend': hp.choice('attend', [None, "add", "mul"]),
-#         'verified': hp.choice('verified', [None, "add", "mul"])
-#     },
-#     'smoothing_level': {
-#         'attend': hp.uniform('attend', 0, 0.99),
-#         'verified': hp.uniform('verified', 0, 0.99)
-#     },
-#     'smoothing_trend': {
-#         'attend': hp.uniform('attend', 0, 0.99),
-#         'verified': hp.uniform('verified', 0, 0.99)
-#     }
-        
-#         }
 
     def _set_model_params(params):
         # Handle special model parameters that are not passed to model constructor
@@ -1860,26 +1919,6 @@ def mv_cv_tune(
                     elif isinstance(lags, list):
                         model.n_lag[target_col] = lags
 
-        if "lag_transform" in params:
-            if isinstance(params["lag_transform"], dict):
-                if model.lag_transform is None:
-                    model.lag_transform = {}
-                # If lag_transform is a dict, set it for each target column
-                for target_col, lag_transform in params["lag_transform"].items():
-                    model.lag_transform[target_col] = lag_transform
-
-        if "difference" in params:
-            if isinstance(params["difference"], dict):
-                # If difference is a dict, set it for each target column
-                for target_col, diff in params["difference"].items():
-                    model.difference[target_col] = diff
-        
-        if "seasonal_length" in params:
-            if isinstance(params["seasonal_length"], dict):
-                # If seasonal_length is a dict, set it for each target column
-                for target_col, seasonal_length in params["seasonal_length"].items():
-                    model.season_diff[target_col] = seasonal_length
-
         if "box_cox" in params:
             if isinstance(params["box_cox"], dict):
                 for target_col, box_cox in params["box_cox"].items():
@@ -1892,33 +1931,34 @@ def mv_cv_tune(
             if isinstance(params["box_cox_biasadj"], dict):
                 for target_col, biasadj in params["box_cox_biasadj"].items():
                     model.biasadj[target_col] = biasadj
-        # Handle ETS trend
-        # in the model: ets_params (dict, optional): Dictionary of ETS model parameters (values are tuples of dictionaries of params) and fit settings for each target variable. Example: {'Target1': [{'trend': 'add', 'seasonal': 'add'}, {'damped_trend': True}], 'Target2': [{'trend': 'mul', 'seasonal': 'mul'}, {'damped_trend': False}]}.
-        # if model.trend is not None:
-        #     model.ets_params = {}
-        #     for target_col in model.trend.keys(): # Iterate over each target column that has a trend (It can be 1 or 2 target columns)
-        #         if (model.trend[target_col]) and (model.trend_type[target_col] in ["ses", "feature_ses"]):
-        #             model.ets_params[target_col] = [{k: params[k][target_col] for k in ["trend", "damped_trend", "seasonal", "seasonal_periods"] if k in params}] # Set trend and seasonal parameters for each target column
-        #             model.ets_fit = {}
-        #             for k in ["smoothing_level", "smoothing_trend", "smoothing_seasonal", "damping_trend"]:
-        #                 if k in params:
-        #                     # Only set "damping_trend" if "damped_trend" is True
-        #                     if (k == "damping_trend") and ("damped_trend" in params and not params["damped_trend"]):
-        #                         continue
-        #                     else:
-        #                         model.ets_fit[k] = params[k][target_col]
-        #             # append model.ets_fit to model.ets_params[target_col]
-        #             model.ets_params[target_col].append(model.ets_fit)
 
     def _get_model_params_for_fit(params):
         # Exclude special parameters that should not be passed to the model constructor
         skip_keys = {
-            "box_cox", "n_lag", "lag_transform", "box_cox_lmda", "box_cox_biasadj",
-            "trend", "damped_trend", "seasonal", "seasonal_periods", "seasonal_length",
-            "smoothing_level", "smoothing_trend", "smoothing_seasonal", "damping_trend",
-            "difference"
-        }
+            "box_cox", "n_lag", "box_cox_lmda", "box_cox_biasadj"}
+        if lag_space is not None:
+            for var, max_lag in lag_space.items():
+                skip_keys.update([f"{var}_lag_{i}" for i in range(1, max_lag + 1)])
+        if transform_space is not None:
+            for var, trans in transform_space.items():
+                skip_keys.update([f"{var}_{t.get_name()}" for t in trans])
+
         return {k: v for k, v in params.items() if k not in skip_keys}
+
+    if lag_space is not None:
+        lag_positions = {}
+        for var, max_lag in lag_space.items():
+            for i in range(1, max_lag + 1):
+                lag_positions[f"{var}_lag_{i}"] = hp.choice(f"{var}_lag_{i}", [0, 1])
+        search_space = {**lag_positions, **param_space}
+    else:
+        search_space = {**param_space}
+
+    if transform_space is not None:
+        transform_positions = {}
+        for var, t in transform_space.items():
+            transform_positions[f"{var}_{t.get_name()}"] = hp.choice(t.get_name(), [0, 1])
+        search_space = {**transform_positions, **search_space}
 
     def objective(params):
         _set_model_params(params)
@@ -1928,7 +1968,29 @@ def mv_cv_tune(
         else:
             # For other models, get the parameters to set
             model_params = _get_model_params_for_fit(params)
-        
+
+        # Set lagged features
+        if lag_space is not None:
+            n_lag_dict = {}
+            for var, max_lag in lag_space.items():
+                selected = [i for i in range(1, max_lag + 1) if params[f"{var}_lag_{i}"] == 1]
+                if selected:   # keep only if some lags chosen
+                    n_lag_dict[var] = selected
+            model.n_lag = n_lag_dict
+            # penalize if no lag is selected for any target
+            if all(len(lags) == 0 for lags in n_lag_dict.values()):
+                model.n_lag = None
+
+        # Set transformations
+        if transform_space is not None:
+            transform_dict = {}
+            for var, trans in transform_space.items():
+                selected_trans = [t for t in trans if params[f"{var}_{t.get_name()}"] == 1]
+                if selected_trans:  # keep only if some transformations chosen
+                    transform_dict[var] = selected_trans
+            model.transform = transform_dict
+            if all(len(t) == 0 for t in transform_dict.values()):
+                model.transform = None
 
         metrics = []
         for train_index, test_index in tscv.split(df):
@@ -1940,7 +2002,7 @@ def mv_cv_tune(
                 model.model.set_params(**model_params)
             model.fit(train)
 
-            y_pred = model.forecast(n_ahead=len(y_test), x_test=x_test)[forecast_col]
+            y_pred = model.forecast(len(y_test), x_test)[forecast_col]
 
             #Evaluate using the specified metric
             if eval_metric.__name__ == "MASE":
@@ -1962,7 +2024,7 @@ def mv_cv_tune(
     trials = Trials()
     best_hyperparams = fmin(
         fn=objective,
-        space=param_space,
+        space=search_space,
         algo=tpe.suggest,
         max_evals=eval_num,
         trials=trials,
@@ -1973,7 +2035,18 @@ def mv_cv_tune(
         for t in trials.trials
     ]
 
-    return space_eval(param_space, best_hyperparams)
+    best_lags = {}
+    if lag_space is not None:
+        for var, max_lag in lag_space.items():
+            chosen = [i for i in range(1, max_lag + 1) if best_hyperparams[f"{var}_lag_{i}"] == 1]
+            best_lags[var] = chosen
+    best_transforms = {}
+    if transform_space is not None:
+        for var, trans in transform_space.items():
+            chosen = [t.get_name() for t in trans if best_hyperparams[f"{var}_{t.get_name()}"] == 1]
+            best_transforms[var] = chosen
+
+    return space_eval(param_space, best_hyperparams), best_lags, best_transforms
 
 def cv_lag_tune(
     model,
