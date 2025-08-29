@@ -512,7 +512,8 @@ def mv_backward_feature_selection(df, target_col, n_folds = None, H = None, mode
 
 def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, metrics = None,
                                   lags_to_consider = None, candidate_features = None, transformations = None, 
-                                    step_size = None, validation_type = "cv", iterations = 10, tol = 1e-4, verbose = False):
+                                    step_size = None, start_lag = None, start_transform = None,
+                                    validation_type = "cv", iterations = 10, tol = 1e-4, verbose = False):
     """
     Performs forward lag/feature/transform selection for Regression models.
     Parameters:
@@ -540,14 +541,30 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
         elif isinstance(lags_to_consider, list):
             remaining_lags = lags_to_consider
         model.lags = None
+        if start_lag is not None:
+            if not isinstance(start_lag, list):
+                raise ValueError("start_lag should be a list of integers.")
+            model.lags = start_lag
+            remaining_lags = [x for x in remaining_lags if x not in start_lag]
+
     if candidate_features is not None:
         candidate_features = candidate_features.copy()
         df = df.drop(columns=candidate_features)
         df_orig = df.copy() # Keep original for feature add-ba
     if transformations is not None:
         transformations = transformations.copy()
-        model.lag_transform = None
-    best_features = {"best_lags": [], "best_exogs": [], "best_transforms": []}
+        if start_transform is not None:
+            if not isinstance(start_transform, list):
+                raise ValueError("start_transform should be a list of transformation instances.")
+            model.lag_transform = start_transform
+            transformations = [x for x in transformations if x not in start_transform]
+        else:
+            model.lag_transform = None
+            
+    best_features = {
+    "best_lags": list(start_lag) if start_lag is not None else [],
+    "best_exogs": [],
+    "best_transforms": list(start_transform) if start_transform is not None else []}
 
     if validation_type == "cv":
         if isinstance(metrics, list):
