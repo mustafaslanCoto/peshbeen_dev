@@ -265,33 +265,46 @@ def target_encoder_for_test(train_df, test_df, feature_col):
 #------------------------------------------------------------------------------
 
 def fourier_terms(
-    start: int,
-    stop: int,
+    start_end_index: tuple,
     period: int,
-    num_terms: int,
-    reference_df: pd.DataFrame
+    num_terms: int
 ) -> pd.DataFrame:
     """
     Generate Fourier terms (sine and cosine) for a given period and number of terms.
 
     Args:
-        start (int): Start index (usually 0 for train, len(train) for test).
-        stop (int): Stop index (len(train) for train, len(train)+len(test) for test).
-        period (int): Seasonal period.
-        num_terms (int): Number of Fourier pairs (sine/cosine) to generate.
-        reference_df (pd.DataFrame): DataFrame whose index will be used for alignment. For example, this could be the training or test dataset.
+        start_end_index (tuple): (start, end) defining the index.
+            - If integers: produces a RangeIndex from start to end (inclusive).
+            - If datetimes (strings or pd.Timestamp): produces a DatetimeIndex from start to end (inclusive, daily freq).
+        period (int): Seasonal period (e.g., 7 for weekly seasonality).
+        num_terms (int): Number of Fourier pairs (sine/cosine).
 
     Returns:
-        pd.DataFrame: DataFrame of Fourier terms, indexed as reference_df.
+        pd.DataFrame: DataFrame of Fourier terms indexed by generated index.
     """
-    t = np.arange(start, stop)
-    if len(t) != len(reference_df):
-        raise ValueError("Length of generated time steps does not match reference DataFrame length.")
-    data = {}
-    for k in range(1, num_terms + 1):
-        data[f'sin_{k}_{period}'] = np.sin(2 * np.pi * k * t / period)
-        data[f'cos_{k}_{period}'] = np.cos(2 * np.pi * k * t / period)
-    return pd.DataFrame(data, index=reference_df.index)
+    start, end = start_end_index
+
+    # Decide index type
+    if isinstance(start, (int, np.integer)) and isinstance(end, (int, np.integer)):
+        index = pd.RangeIndex(start, end+1)  # exclusive of end
+        t = np.arange(len(index))
+    else:
+        # Convert to datetime if string given
+        start, end = pd.to_datetime(start), pd.to_datetime(end)
+        index = pd.date_range(start, end, freq="D")
+        t = np.arange(len(index))
+
+    # Build Fourier terms
+    terms = {
+        f'sin_{k}_{period}': np.sin(2 * np.pi * k * t / period)
+        for k in range(1, num_terms + 1)
+    }
+    terms.update({
+        f'cos_{k}_{period}': np.cos(2 * np.pi * k * t / period)
+        for k in range(1, num_terms + 1)
+    })
+
+    return pd.DataFrame(terms, index=index)
 
 # @jit(nopython=True)
 # Your transformation classes
