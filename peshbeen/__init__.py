@@ -16,7 +16,7 @@ from peshbeen.transformations import (fourier_terms, rolling_quantile,
                         back_box_cox_transform,undiff_ts, seasonal_diff, invert_seasonal_diff,
                         nzInterval, zeroCumulative, kfold_target_encoder, target_encoder_for_test,
                         regression_detrend, forecast_trend)
-from peshbeen.metrics import (MAPE, MASE, MSE, MAE, RMSE, SMAPE, CFE, CFE_ABS, WMAPE)
+from peshbeen.metrics import (MAPE, MASE, MSE, MAE, RMSE, SMAPE, CFE, CFE_ABS, WMAPE, MASE, SMAE, SRMSE, RMSSE)
 from peshbeen.prob_forecast import (conformalizer, s_arima_conformalizer, ets_conformalizer,
                                        bidirect_ts_conformalizer, var_conformalizer, bag_boost_aggr_conformalizer,
                                        bidirect_aggr_conformalizer, ets_aggr_conformalizer, s_arima_aggr_conformalizer,

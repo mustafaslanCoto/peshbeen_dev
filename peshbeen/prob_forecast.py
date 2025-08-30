@@ -451,9 +451,9 @@ class bidirect_ts_conformalizer():
             self.model.fit(self.train_df)
             
         if X is not None:
-            y_pred = self.model.forecast(n_ahead = self.H, x_test= X)[self.col]
+            y_pred = self.model.forecast(self.H, X)[self.col]
         else:
-            y_pred = self.model.forecast(n_ahead = self.H)[self.col]
+            y_pred = self.model.forecast(self.H)[self.col]
             
         result = []
         result.append(y_pred)
@@ -729,9 +729,9 @@ class bag_boost_aggr_conformalizer():
         for f in self.models_f:
             # y_pred += self.models_f[i].forecast(self.H,  x_test= X)
             if X is not None:
-                y_pred += f.forecast(self.H,  x_test= X)
+                y_pred += f.forecast(self.H,  X)
             else:
-                y_pred += f.forecast(n_ahead = self.H)
+                y_pred += f.forecast(self.H)
             
         result = []
         result.append(y_pred)
@@ -871,7 +871,7 @@ class bidirect_aggr_conformalizer():
             if X is not None:
                 y_pred += f.forecast(self.H,  x_test= X)[self.idx]
             else:
-                y_pred += f.forecast(n_ahead = self.H)[self.idx]
+                y_pred += f.forecast(self.H)[self.idx]
             
         result = []
         result.append(y_pred)

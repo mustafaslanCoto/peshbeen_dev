@@ -47,6 +47,29 @@ def MAE(y_true, y_pred):
 
     return np.mean(np.abs(y_true - y_pred))
 
+def SMAE(y_true, y_pred, y_train):
+    """
+    Calculate Scaled Mean Absolute Error (SMAE). Multiplied by 100.
+
+    Parameters:
+    - y_true: Array of true values.
+    - y_pred: Array of predicted values.
+    - y_train: Array of training values.
+
+    Returns:
+    - smae: Scaled Mean Absolute Error.
+    """
+    # Ensure both arrays have the same length
+    if len(y_true) != len(y_pred):
+        raise ValueError("Input arrays must have the same length.")
+    # Convert to numpy arrays for element-wise operations
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    y_train = np.array(y_train)
+
+    # Calculate scaled mean absolute error
+    return np.mean(np.abs(y_true - y_pred))*100/np.mean(y_train)
+
 def MSE(y_true, y_pred):
     """
     Calculate Mean Squared Error (MSE).
@@ -87,6 +110,54 @@ def RMSE(y_true, y_pred):
     y_pred = np.array(y_pred)
 
     return np.sqrt(np.mean((y_true - y_pred) ** 2))
+
+def SRMSE(y_true, y_pred, y_train):
+    """
+    Calculate Scaled Root Mean Square Error (SRMSE).
+
+    Parameters:
+    - y_true: Array of true values.
+    - y_pred: Array of predicted values.
+    - y_train: Array of training values.
+
+    Returns:
+    - srmse: Scaled Root Mean Square Error.
+    """
+    # Ensure all arrays have the same length
+    if len(y_true) != len(y_pred) or len(y_train) != len(y_true):
+        raise ValueError("Input arrays must have the same length.")
+
+    # Convert to numpy arrays for element-wise operations
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    y_train = np.array(y_train)
+
+
+    return np.sqrt(np.mean((y_true - y_pred) ** 2))/np.mean(y_train)
+
+def RMSSE(y_true, y_pred, y_train):
+    """
+    Calculate Root Mean Squared Scaled Error (RMSSE).
+
+    Parameters:
+    - y_true: Array of true values.
+    - y_pred: Array of predicted values.
+    - y_train: Array of training values.
+
+    Returns:
+    - rmsse: Root Mean Squared Scaled Error.
+    """
+    # Ensure all arrays have the same length
+    if len(y_true) != len(y_pred) or len(y_train) != len(y_true):
+        raise ValueError("Input arrays must have the same length.")
+
+    # Convert to numpy arrays for element-wise operations
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    y_train = np.array(y_train)
+
+    mse = np.mean((y_true - y_pred) ** 2)
+    return np.sqrt(mse / np.mean(np.diff(y_train) ** 2))
 
 def SMAPE(y_true, y_pred):
     """

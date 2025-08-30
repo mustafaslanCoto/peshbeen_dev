@@ -1537,7 +1537,7 @@ def cv_hmm_lag_tune(
             y_pred = model_.forecast(len(y_test), x_test)
 
             #Evaluate using the specified metric
-            if eval_metric.__name__ == "MASE":
+            if eval_metric.__name__ in ["MASE", "SMAE", "SRMSE", "RMSSE"]:
                 score = eval_metric(y_test[-opt_horizon:] if opt_horizon else y_test,
                                     y_pred[-opt_horizon:] if opt_horizon else y_pred,
                                     train[model.target_col])
@@ -1638,10 +1638,10 @@ def cross_validate(model, df, cv_split, test_size, metrics, step_size=None):
         x_test = test.drop(columns=[model.target_col])
         y_test = np.array(test[model.target_col])
         model.fit(train)
-        bb_forecast = model.forecast(test_size, x_test=x_test)
+        bb_forecast = model.forecast(test_size, x_test)
         # Evaluate each metric
         for m in metrics:
-            if m.__name__ == "MASE":
+            if m.__name__ in ["MASE", "SMAE", "SRMSE", "RMSSE"]:
                 eval_val = m(y_test, bb_forecast, train[model.target_col])
             else:
                 eval_val = m(y_test, bb_forecast)
@@ -1673,13 +1673,13 @@ def mv_cross_validate(model, df, cv_split, test_size, metrics, step_size=None):
         
         model.fit(train)
 
-        forecast_vals1, forecast_vals2 = model.forecast(test_size, x_test=x_test)
+        forecast_vals1, forecast_vals2 = model.forecast(test_size, x_test)
         forecat_df = test[model.target_cols]
         forecat_df["forecasts1"] = forecast_vals1
         forecat_df["forecasts2"] = forecast_vals2
         cv_forecasts_df = pd.concat([cv_forecasts_df, forecat_df], axis=0)
         for m in metrics:
-            if m.__name__ == "MASE":
+            if m.__name__ in ["MASE", "SMAE", "SRMSE", "RMSSE"]:
                 val1 = m(y_test1, forecast_vals1, train[model.target_cols[0]])
                 val2 = m(y_test2, forecast_vals2, train[model.target_cols[1]])
             else:
@@ -1821,7 +1821,7 @@ def cv_tune(
             y_pred = model.forecast(len(y_test), x_test)
 
             #Evaluate using the specified metric
-            if eval_metric.__name__ == "MASE":
+            if eval_metric.__name__ in ["MASE", "SMAE", "SRMSE", "RMSSE"]:
                 score = eval_metric(y_test[-opt_horizon:] if opt_horizon else y_test,
                                     y_pred[-opt_horizon:] if opt_horizon else y_pred,
                                     train[model.target_col])
@@ -2005,7 +2005,7 @@ def mv_cv_tune(
             y_pred = model.forecast(len(y_test), x_test)[forecast_col]
 
             #Evaluate using the specified metric
-            if eval_metric.__name__ == "MASE":
+            if eval_metric.__name__ in ["MASE", "SMAE", "SRMSE", "RMSSE"]:
                 score = eval_metric(y_test[-opt_horizon:] if opt_horizon else y_test,
                                     y_pred[-opt_horizon:] if opt_horizon else y_pred,
                                     train[model.target_col])
@@ -2114,7 +2114,7 @@ def cv_lag_tune(
             y_pred = model_.forecast(len(y_test), x_test)
 
             #Evaluate using the specified metric
-            if eval_metric.__name__ == "MASE":
+            if eval_metric.__name__ in ["MASE", "SMAE", "SRMSE", "RMSSE"]:
                 score = eval_metric(y_test[-opt_horizon:] if opt_horizon else y_test,
                                     y_pred[-opt_horizon:] if opt_horizon else y_pred,
                                     train[model.target_col])
@@ -2186,11 +2186,11 @@ def hmm_cross_validate(model, df, cv_split, test_size, metrics, learn_per_fold =
             model_.fit(train)
 
         # Forecast using the model
-        bb_forecast = model_.forecast(test_size, exog=x_test)
+        bb_forecast = model_.forecast(test_size, x_test)
         # Evaluate each metric
         for m in metrics:
-            if m.__name__ == 'MASE':
-                eval_val = m(y_test, bb_forecast)
+            if m.__name__ in ['MASE', 'SMAE', 'SRMSE', 'RMSSE']:
+                eval_val = m(y_test, bb_forecast, np.array(train[model.target_col]))
             else:
                 eval_val = m(y_test, bb_forecast)
             metrics_dict[m.__name__].append(eval_val)
@@ -2229,9 +2229,9 @@ def hmm_mv_cross_validate(model, df, cv_split, test_size, metrics, learn_per_fol
         else: # learn_per_fold == "None" or learn_per_fold == "first" for remaining folds
             model.fit(train)
 
-        forecasts = model.forecast(test_size, exog=x_test) # dictionary of forecasts for all target columns
+        forecasts = model.forecast(test_size, x_test) # dictionary of forecasts for all target columns
         for m in metrics:
-            if m.__name__ == 'MASE':
+            if m.__name__ in ['MASE', 'SMAE', 'SRMSE', 'RMSSE']:
                 val = [m(test[target_col], forecasts[target_col], train[target_col]) for target_col in model.target_col]
             else:
                 val = [m(test[target_col], forecasts[target_col]) for target_col in model.target_col]
