@@ -1209,10 +1209,10 @@ class MsHmmRegression:
                 self.len = len(dfc)
                 self.target_orig = dfc[self.target_col] # Store original values for later use during forecasting
                 if self.trend == "linear":
-                    self.lr_model = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), dfc[self.target_col])
+                    self.lr_model = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), self.target_orig)
                     dfc[self.target_col] = dfc[self.target_col] - self.lr_model.predict(np.arange(self.len).reshape(-1, 1))
                 if self.trend == "ets":
-                    self.ets_model_fit = ExponentialSmoothing(dfc[self.target_col], **self.ets_model).fit(**self.ets_fit)
+                    self.ets_model_fit = ExponentialSmoothing(self.target_orig, **self.ets_model).fit(**self.ets_fit)
                     dfc[self.target_col] = dfc[self.target_col] - self.ets_model_fit.fittedvalues.values
 
             # Apply differencing if specified
@@ -1464,6 +1464,122 @@ class MsHmmRegression:
         return copy.deepcopy(self)
 
     
+    # def forecast(self, H, exog=None):
+    #     """
+    #     Forecast H periods ahead using fitted HMM regression (log-domain version), with advanced post-processing.
+
+    #     Handles:
+    #     - Trend re-adjustment (linear/ETS)
+    #     - Seasonal differencing reversal
+    #     - Regular differencing reversal
+    #     - Box-Cox back-transform
+    #     - Exogenous variables
+    #     - Lag transformations
+    #     """
+    #     y_list = self.y.tolist()
+    #     forecasts_ = []
+    #     N = self.N
+
+    #     # Prepare exogenous future regressors if provided
+    #     if exog is not None:
+    #         if self.cons:
+    #             if exog.shape[0] == 1:
+    #                 exog.insert(0, 'const', 1)
+    #             else:
+    #                 exog = sm.add_constant(exog)
+    #         exog = np.array(self.data_prep(exog))
+
+    #     # Prepare for trend adjustment
+    #     # This assumes you stored original target (pre-trend removal) in self.target_orig
+    #     if hasattr(self, 'target_orig') and self.trend is not None:
+    #         orig_targets = self.target_orig.tolist()  # Used to re-add trend during forecasting
+
+    #     # Init with last forward distribution (in log)
+    #     log_forward_last = self.log_forward[:, -1]
+    #     logA = np.log(self.A + 1e-300)
+
+    #     # Forward
+    #     log_alpha = np.empty((N, H))
+    #     log_alpha[:, 0] = logsumexp(log_forward_last[:, None] + logA, axis=0)
+    #     for t in range(1, H):
+    #         # log_alpha[:,t] = logB[:,t] + logsumexp_i( log_alpha[i,t-1] + logA[i,:] )
+    #         log_alpha[:, t] = logsumexp(log_alpha[:, t-1][:, None] + logA, axis=0)
+
+    #     log_alpha -= logsumexp(log_alpha, axis=0)
+    #     self.forecast_forward = np.exp(log_alpha)
+    #     self.state_forecasts = np.argmax(self.forecast_forward, axis=0)
+
+
+    #     for t in range(H):
+    #         if exog is not None:
+    #             exo_inp = exog[t].tolist()
+    #         else:
+    #             exo_inp = [1] if self.cons else []
+    #         lags = [y_list[-l] for l in self.lags]
+    #         transform_lag = []
+    #         if self.lag_transform is not None:
+    #             series_array = np.array(y_list)
+    #             for func in self.lag_transform:
+    #                 transform_lag.append(func(series_array, is_forecast=True).to_numpy()[-1])
+    #         inp = np.array(exo_inp + lags + transform_lag)
+
+    #         state_preds = np.zeros(N)
+    #         for j in range(N):
+    #             mu = np.dot(self.coeffs[j], inp)
+    #             state_preds[j] = mu
+
+    #         # normalize to probabilities
+
+    #         # normalize to probabilities
+    #         pred_w = np.sum(self.forecast_forward[:, t] * state_preds)
+    #         forecasts_.append(pred_w)
+    #         y_list.append(pred_w)
+
+    #         # --- Trend re-adjustment ---
+    #         if self.trend is not None:
+    #             if self.trend == "linear":
+    #                 # Fit a linear trend on original targets
+    #                 trend_fit = LinearRegression().fit(
+    #                     np.arange(len(orig_targets)).reshape(-1, 1),
+    #                     np.array(orig_targets)
+    #                 )
+    #                 trend_forecast = trend_fit.predict(np.array([[len(orig_targets)]]))[0]
+    #             elif self.trend == "ets":
+    #                 # Fit an ETS model and forecast next point
+    #                 trend_fit = ExponentialSmoothing(
+    #                     np.array(orig_targets),
+    #                     **self.ets_model
+    #                 ).fit(**self.ets_fit)
+    #                 trend_forecast = trend_fit.forecast(1)[0]
+    #             else:
+    #                 trend_forecast = 0.0  # fallback
+
+    #             orig_forecast = pred_w + trend_forecast
+    #             forecasts_[-1] = orig_forecast    # overwrite with trend-adjusted value
+    #             orig_targets.append(orig_forecast)  # update for next lag/trend step
+
+    #         # log_forward_last = log_f_t.copy()
+
+    #     forecasts = np.array(forecasts_)
+
+    #     # --- Revert seasonal differencing if applied ---
+    #     if self.season_diff is not None:
+    #         forecasts = invert_seasonal_diff(self.orig_d, forecasts, self.season_diff)
+
+    #     # --- Revert regular differencing if applied ---
+    #     if self.diff is not None:
+    #         forecasts = undiff_ts(self.orig, forecasts, self.diff)
+
+    #     # --- Box-Cox back-transform if applied ---
+    #     if self.box_cox:
+    #         forecasts = back_box_cox_transform(
+    #             y_pred=forecasts, lmda=self.lamda,
+    #             shift=self.is_zero, box_cox_biasadj=self.biasadj
+    #         )
+
+    #     return forecasts
+
+
     def forecast(self, H, exog=None):
         """
         Forecast H periods ahead using fitted HMM regression (log-domain version), with advanced post-processing.
@@ -1489,10 +1605,6 @@ class MsHmmRegression:
                     exog = sm.add_constant(exog)
             exog = np.array(self.data_prep(exog))
 
-        # Prepare for trend adjustment
-        # This assumes you stored original target (pre-trend removal) in self.target_orig
-        if hasattr(self, 'target_orig') and self.trend is not None:
-            orig_targets = self.target_orig.tolist()  # Used to re-add trend during forecasting
 
         # Init with last forward distribution (in log)
         log_forward_last = self.log_forward[:, -1]
@@ -1508,6 +1620,28 @@ class MsHmmRegression:
         log_alpha -= logsumexp(log_alpha, axis=0)
         self.forecast_forward = np.exp(log_alpha)
         self.state_forecasts = np.argmax(self.forecast_forward, axis=0)
+
+        # Prepare for trend adjustment
+        # This assumes you stored original target (pre-trend removal) in self.target_orig
+        if hasattr(self, 'target_orig') and self.trend is not None:
+            # orig_targets = self.target_orig.tolist()  # Used to re-add trend during forecasting
+            # --- Trend re-adjustment ---
+            if self.trend == "linear":
+                # Fit a linear trend on original targets
+                # trend_fit = LinearRegression().fit(
+                #     np.arange(len(orig_targets)).reshape(-1, 1),
+                #     np.array(orig_targets)
+                # )
+                future_time = np.arange(len(self.target_orig), len(self.target_orig) + H).reshape(-1, 1)
+                trend_forecast = np.array(self.lr_model.predict(future_time))
+            elif self.trend == "ets":
+                # Fit an ETS model and forecast next point
+                # trend_fit = ExponentialSmoothing(
+                #     np.array(orig_targets),
+                #     **self.ets_model
+                # ).fit(**self.ets_fit)
+                trend_forecast = np.array(self.ets_model_fit.forecast(H))
+
 
 
         for t in range(H):
@@ -1535,32 +1669,12 @@ class MsHmmRegression:
             forecasts_.append(pred_w)
             y_list.append(pred_w)
 
-            # --- Trend re-adjustment ---
-            if self.trend is not None:
-                if self.trend == "linear":
-                    # Fit a linear trend on original targets
-                    trend_fit = LinearRegression().fit(
-                        np.arange(len(orig_targets)).reshape(-1, 1),
-                        np.array(orig_targets)
-                    )
-                    trend_forecast = trend_fit.predict(np.array([[len(orig_targets)]]))[0]
-                elif self.trend == "ets":
-                    # Fit an ETS model and forecast next point
-                    trend_fit = ExponentialSmoothing(
-                        np.array(orig_targets),
-                        **self.ets_model
-                    ).fit(**self.ets_fit)
-                    trend_forecast = trend_fit.forecast(1)[0]
-                else:
-                    trend_forecast = 0.0  # fallback
-
-                orig_forecast = pred_w + trend_forecast
-                forecasts_[-1] = orig_forecast    # overwrite with trend-adjusted value
-                orig_targets.append(orig_forecast)  # update for next lag/trend step
-
             # log_forward_last = log_f_t.copy()
 
         forecasts = np.array(forecasts_)
+
+        if self.trend is not None:
+            forecasts += trend_forecast
 
         # --- Revert seasonal differencing if applied ---
         if self.season_diff is not None:
@@ -1578,7 +1692,6 @@ class MsHmmRegression:
             )
 
         return forecasts
-
 # Hidden Markov Model with Vector Autoregressive (VAR)
 
 class MsHmmVar:
