@@ -155,3 +155,58 @@ def pacf_exceedance(series, alpha=0.05, n_lags=5, adjusted=True):
     exceed_score = exceed_score[exceed_score["abs_score"] > 0]
     exceed_score.index.name = "lag"
     return exceed_score
+
+
+def lr_trend_model(series, breakpoints=None, type='linear'):
+    """
+    Compute the piecewise trend of a time series using linear regression.
+    Args:
+        series (pd.Series): The input time series.
+        breakpoints (list): A list of breakpoints for the piecewise segments when type is "piecewise". It could be a list of indices.
+        type (str): The type of model ("linear" or "piecewise")
+
+    Returns:
+        pd.Series: The piecewise trend of the time series, with length of each trend index to be used for forecasting and the fitted model
+    """ 
+
+    T = np.arange(len(series), dtype=int)
+
+    if type == 'piecewise' and breakpoints is not None:
+        # Base regressor (time itself)
+        X_trend = T.reshape(-1, 1)
+
+        # Add hinge terms for each breakpoint
+        for bp in breakpoints:
+            hinge = np.maximum(0, T - bp).reshape(-1, 1)
+            X_trend = np.hstack([X_trend, hinge])
+
+        model_lr = LinearRegression().fit(X_trend, np.array(series))
+        trend = model_lr.predict(X_trend)
+    else:
+        X_trend = T.reshape(-1, 1)
+        model_lr = LinearRegression().fit(X_trend, np.array(series))
+        trend = model_lr.predict(X_trend)
+    return trend, model_lr
+
+def forecast_trend(model, H, start, breakpoints=None):
+    """
+    Forecast future trend values using the fitted model.
+    Args:
+        model (LinearRegression): The fitted linear regression model.
+        breakpoints (list): A list of breakpoints for the piecewise segments.
+        H (int): The forecast horizon.
+        start (int): The starting point for the forecast.
+
+    Returns:
+        np.ndarray: The forecasted trend values.
+    """
+    T_future = np.arange(start, start + H, dtype=int).reshape(-1, 1)
+
+    # Build future design matrix
+    X_future = T_future
+    if breakpoints is not None:
+        for bp in breakpoints:
+            hinge = np.maximum(0, T_future - bp).reshape(-1, 1)
+            X_future = np.hstack([X_future, hinge])
+
+    return model.predict(X_future)
