@@ -469,31 +469,3 @@ class expanding_ets:
     
     def get_name(self):
         return f"expanding_ets_{self.shift}"
-
-#------------------------------------------------------------------------------
-# Regression Detrending and Forecasting
-#------------------------------------------------------------------------------
-
-def regression_detrend(series):
-    """
-    Detrends a time series using linear regression.
-    Args:
-        series (array-like): The time series data to be detrended.
-    Returns:
-        np.ndarray: The detrended time series.
-    """
-    model = LinearRegression().fit(np.array(range(len(series))).reshape(-1, 1),series)
-# Make predictions
-    y_pred = model.predict(np.array(range(len(series))).reshape(-1, 1))
-    return np.array(series)-y_pred
-
-def forecast_trend(train_series, H):
-    """ Forecasts the trend of a time series using linear regression.
-    Args:
-        train_series (array-like): The training time series data.
-        H (int): The forecast horizon.
-    Returns:
-        np.ndarray: The forecasted trend values.
-    """
-    model = LinearRegression().fit(np.array(range(len(train_series))).reshape(-1, 1),train_series)
-    return model.predict(np.array(range(len(train_series), len(train_series)+H)).reshape(-1, 1))
