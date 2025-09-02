@@ -8,7 +8,7 @@ from peshbeen.model_selection import (cross_validate,  mv_cross_validate,
                                       hmm_mv_forward_feature_selection, hmm_mv_backward_feature_selection,
                                       hmm_cross_validate, hmm_mv_cross_validate,
                                       cv_hmm_lag_tune, cv_lag_tune)
-from peshbeen.statplots import (cross_autocorrelation_plot, plot_PACF_ACF)
+from peshbeen.statplots import (plot_PACF_ACF, plot_ccf)
 from peshbeen.stattools import (unit_root_test, cross_autocorrelation, pacf_exceedance, lr_trend_model, forecast_trend)
 from peshbeen.transformations import (fourier_terms, rolling_quantile,
                         rolling_mean, rolling_std, expanding_mean, expanding_std,
