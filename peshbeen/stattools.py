@@ -138,26 +138,27 @@ def pacf_exceedance(series, alpha=0.05, n_lags=5, adjusted=True):
     Returns:
     - A DataFrame containing the exceedance scores for each lag. Also includes the absolute scores
     """
+    
     pacf_vals = pacf(series, nlags=n_lags)[1:]
     n= len(series)   
     z = NormalDist().inv_cdf(1 - alpha/2)
     bound = z / np.sqrt(n - n_lags) if adjusted else z / np.sqrt(n)
-    exceed_score = {}
+    exceed_score = []
     for i, j in enumerate(pacf_vals):
         if j > bound:
-            exceed_score[i+1] = (j-bound)/bound
+            exceed_score.append(((j-bound)/bound, j, bound))
+
         elif j < -bound:
-            exceed_score[i+1] = (j+bound)/bound
+            exceed_score.append(((j+bound)/bound, j, -bound))
         else:
-            exceed_score[i+1] = 0
-    exceed_score = pd.DataFrame(exceed_score, index=[0]).T
-    exceed_score.columns = ["exceedance_score"]
-    exceed_score["abs_score"] = exceed_score["exceedance_score"].abs()
-    exceed_score = exceed_score.sort_values(by="abs_score", ascending=False)
-    exceed_score = exceed_score[exceed_score["abs_score"] > 0]
+            exceed_score.append((0, j, bound))
+    exceed_score = pd.DataFrame(exceed_score)
+    exceed_score.columns = ["exceedance_score", "pacf_value", "z_bound"]
+    exceed_score["abs_exc_score"] = exceed_score["exceedance_score"].abs()
+    exceed_score = exceed_score.sort_values(by="abs_exc_score", ascending=False)
+    exceed_score = exceed_score[exceed_score["abs_exc_score"] > 0]
     exceed_score.index.name = "lag"
     return exceed_score
-
 
 def lr_trend_model(series, breakpoints=None, type='linear'):
     """
