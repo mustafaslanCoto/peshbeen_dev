@@ -61,7 +61,7 @@ def plot_PACF_ACF(series, lag_num=40, figsize=(15, 8), pacf_method='ywm', alpha=
     axes[1].grid(True)
 
     fig.tight_layout()
-    plt.show()
+    return axes
 
 
 # def cross_autocorrelation_plot(x, y, nlags, adjusted=True, alpha=0.05, figsize=(8, 5), title="Cross-Autocorrelation"):
