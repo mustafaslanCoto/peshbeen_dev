@@ -124,7 +124,7 @@ def SRMSE(y_true, y_pred, y_train):
     - srmse: Scaled Root Mean Square Error.
     """
     # Ensure all arrays have the same length
-    if len(y_true) != len(y_pred) or len(y_train) != len(y_true):
+    if len(y_true) != len(y_pred):
         raise ValueError("Input arrays must have the same length.")
 
     # Convert to numpy arrays for element-wise operations
@@ -148,7 +148,7 @@ def RMSSE(y_true, y_pred, y_train):
     - rmsse: Root Mean Squared Scaled Error.
     """
     # Ensure all arrays have the same length
-    if len(y_true) != len(y_pred) or len(y_train) != len(y_true):
+    if len(y_true) != len(y_pred):
         raise ValueError("Input arrays must have the same length.")
 
     # Convert to numpy arrays for element-wise operations
