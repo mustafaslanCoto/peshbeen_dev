@@ -17,6 +17,8 @@ from statistics import NormalDist
 import warnings
 warnings.filterwarnings("ignore")
 from statsmodels.tsa.stattools import pacf
+from statsmodels.tsa.seasonal import STL, MSTL
+from statsmodels.nonparametric.smoothers_lowess import lowess
 
 #------------------------------------------------------------------------------
 # Unit Root Test and Serial Correlation Check
@@ -210,3 +212,25 @@ def forecast_trend(model, H, start, breakpoints=None):
             X_future = np.hstack([X_future, hinge])
 
     return model.predict(X_future)
+
+
+def trend_strength(series, **kwargs):
+    """
+    Compute the strength of the trend component in a time series using Hyndman formula.
+    Args:
+        series (pd.Series): The time series data.
+        **kwargs: Additional arguments passed to the STL decomposition. For example, you can specify the period, seasonal and/or trend components.
+
+    """
+    res = STL(series, **kwargs).fit()
+    return np.max(1-np.var(res.resid)/(np.var(res.resid+res.trend)), 0)
+
+def seasonality_strength(series, **kwargs):
+    """
+    Compute the strength of the seasonal component in a time series using Hyndman formula.
+    Args:
+        series (pd.Series): The time series data.
+        **kwargs: Additional arguments passed to the STL decomposition. For example, you can specify the period, seasonal and/or trend components.
+    """
+    res = STL(series, **kwargs).fit()
+    return np.max(1-np.var(res.resid)/(np.var(res.resid+res.seasonal)), 0)
