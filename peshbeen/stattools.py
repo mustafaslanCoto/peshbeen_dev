@@ -19,6 +19,7 @@ warnings.filterwarnings("ignore")
 from statsmodels.tsa.stattools import pacf
 from statsmodels.tsa.seasonal import STL, MSTL
 from statsmodels.nonparametric.smoothers_lowess import lowess
+from statsmodels.tsa.stattools import ccf
 
 #------------------------------------------------------------------------------
 # Unit Root Test and Serial Correlation Check
@@ -124,9 +125,9 @@ def cross_autocorrelation(x, y, nlags, adjusted=True, alpha=None, bartlett_confi
     
 
 
-def pacf_exceedance(series, alpha=0.05, n_lags=5, adjusted=True):
+def pacf_strength(series, alpha=0.05, n_lags=5, adjusted=True):
     """
-    Calculate the exceedance scores for the partial autocorrelation function (PACF) of a time series to identify powerful significant lags.
+    Calculate the pacf scores for the partial autocorrelation function (PACF) of a time series to identify powerful significant lags.
     It is calculated as (PACF value - bound) / bound for positive exceedances and (PACF value + bound) / bound for negative exceedances.
 
     Parameters:
@@ -154,15 +155,56 @@ def pacf_exceedance(series, alpha=0.05, n_lags=5, adjusted=True):
         else:
             exceed_score.append([i, 0, j, bound])
     exceed_score = pd.DataFrame(exceed_score)
-    exceed_score.columns = ["lags", "exceedance_score", "pacf_value", "z_bound"]
-    exceed_score["abs_exc_score"] = exceed_score["exceedance_score"].abs()
-    exceed_score = exceed_score.sort_values(by="abs_exc_score", ascending=False)
-    exceed_score = exceed_score[exceed_score["abs_exc_score"] > 0]
+    exceed_score.columns = ["lags", "pacf_score", "pacf_value", "z_bound"]
+    exceed_score["abs_pacf_score"] = exceed_score["pacf_score"].abs()
+    exceed_score = exceed_score.sort_values(by="abs_pacf_score", ascending=False)
+    exceed_score = exceed_score[exceed_score["abs_pacf_score"] > 0]
     exceed_score.index.name = "lag"
     exceed_score = exceed_score[1:]  # remove lag 0
 
     return exceed_score
 
+
+def ccf_strength(x, y, alpha=0.05, n_lags=5, adjusted=True):
+    """
+    Calculate the ccf scores for the cross-correlation function (CCF) between two time series to identify powerful significant lags.
+    It is calculated as (CCF value - bound) / bound for positive exceedances and (CCF value + bound) / bound for negative exceedances.
+
+    Parameters:
+    - x: The first input time series data.
+    - y: The second input time series data.
+    - alpha: Significance level for the confidence intervals.
+    - n_lags: Number of lags to consider for the CCF.
+    - adjusted: Whether to use an adjusted bound for the CCF.
+
+    Returns:
+    - A DataFrame containing the exceedance scores for each lag. Also includes the absolute scores
+    """
+    
+    # Compute CCF and confidence interval
+    z = NormalDist().inv_cdf(1 - alpha/2)
+    ccr_values = ccf(x, y)[: n_lags + 1]
+    # ci = 2 / np.sqrt(len(y))
+    bound = z / np.sqrt(len(y) - n_lags) if adjusted else z / np.sqrt(len(y))
+    exceed_score = []
+    for i, j in enumerate(ccr_values):
+        # print(i)
+        if j > bound:
+            exceed_score.append([i, (j-bound)/bound, j, bound])
+
+        elif j < -bound:
+            exceed_score.append([i, (j+bound)/bound, j, -bound])
+        else:
+            exceed_score.append([i, 0, j, bound])
+    exceed_score = pd.DataFrame(exceed_score)
+    exceed_score.columns = ["lags", "corr_score", "ccf_value", "z_bound"]
+    exceed_score["abs_corr_score"] = exceed_score["corr_score"].abs()
+    exceed_score = exceed_score.sort_values(by="abs_corr_score", ascending=False)
+    exceed_score = exceed_score[exceed_score["abs_corr_score"] > 0]
+    exceed_score.index.name = "lag"
+    exceed_score = exceed_score[1:]  # remove lag 0
+
+    return exceed_score
 
 def lr_trend_model(series, breakpoints=None, type='linear'):
     """
