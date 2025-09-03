@@ -167,42 +167,50 @@ def pacf_strength(series, alpha=0.05, n_lags=5, adjusted=True):
 
 def ccf_strength(x, y, alpha=0.05, n_lags=5, adjusted=True):
     """
-    Calculate the ccf scores for the cross-correlation function (CCF) between two time series to identify powerful significant lags.
-    It is calculated as (CCF value - bound) / bound for positive exceedances and (CCF value + bound) / bound for negative exceedances.
+    Calculate exceedance scores for the cross-correlation function (CCF).
 
-    Parameters:
-    - x: The first input time series data.
-    - y: The second input time series data.
-    - alpha: Significance level for the confidence intervals.
-    - n_lags: Number of lags to consider for the CCF.
-    - adjusted: Whether to use an adjusted bound for the CCF.
+    Parameters
+    ----------
+    x, y : array-like
+        Input time series.
+    alpha : float
+        Significance level for CI.
+    n_lags : int
+        Number of lags to consider.
+    adjusted : bool
+        If True, use lag-specific CI (sqrt(n-k)); 
+        if False, use fixed CI (sqrt(n)).
 
-    Returns:
-    - A DataFrame containing the exceedance scores for each lag. Also includes the absolute scores
+    Returns
+    -------
+    DataFrame
+        Exceedance scores for each lag (excluding lag 0).
     """
-    
-    # Compute CCF and confidence interval
+    n = len(y)
     z = NormalDist().inv_cdf(1 - alpha/2)
     ccr_values = ccf(x, y)[: n_lags + 1]
-    # ci = 2 / np.sqrt(len(y))
-    bound = z / np.sqrt(len(y) - n_lags) if adjusted else z / np.sqrt(len(y))
-    exceed_score = []
-    for i, j in enumerate(ccr_values):
-        # print(i)
-        if j > bound:
-            exceed_score.append([i, (j-bound)/bound, j, bound])
 
-        elif j < -bound:
-            exceed_score.append([i, (j+bound)/bound, j, -bound])
+    exceed_score = []
+    for k, j in enumerate(ccr_values):
+        if adjusted:
+            bound = z / np.sqrt(n - k)
         else:
-            exceed_score.append([i, 0, j, bound])
-    exceed_score = pd.DataFrame(exceed_score)
-    exceed_score.columns = ["lags", "corr_score", "ccf_value", "z_bound"]
+            bound = z / np.sqrt(n)
+
+        if j > bound:
+            exceed_score.append([k, (j - bound) / bound, j, bound])
+        elif j < -bound:
+            exceed_score.append([k, (j + bound) / bound, j, -bound])
+        else:
+            exceed_score.append([k, 0, j, bound])
+
+    exceed_score = pd.DataFrame(exceed_score, columns=["lags", "corr_score", "ccf_value", "z_bound"])
     exceed_score["abs_corr_score"] = exceed_score["corr_score"].abs()
-    exceed_score = exceed_score.sort_values(by="abs_corr_score", ascending=False)
+
+    # drop lag 0 (auto-correlation with itself)
+    exceed_score = exceed_score.loc[exceed_score["lags"] != 0]
     exceed_score = exceed_score[exceed_score["abs_corr_score"] > 0]
-    exceed_score.index.name = "lag"
-    exceed_score = exceed_score[1:]  # remove lag 0
+    exceed_score = exceed_score.sort_values(by="abs_corr_score", ascending=False)
 
     return exceed_score
 

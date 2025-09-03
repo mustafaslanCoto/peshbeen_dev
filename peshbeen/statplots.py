@@ -137,30 +137,37 @@ def plot_PACF_ACF(series, lag_num=40, figsize=(15, 8), pacf_method='ywm', alpha=
 
 
 
-def plot_ccf(x, y, lags, alpha=0.05, figsize=[10, 5], adjusted=False):
+def plot_ccf(x, y, lags, alpha=0.05, figsize=(10, 5), adjusted=True):
     """
     Plot the cross-correlation function (CCF) between two time series.
-    Args:
-        x (array-like): First time series.
-        y (array-like): Second time series.
-        lags (int): Number of lags to include in the plot.
-        alpha (float): Significance level for confidence intervals.
-        figsize (tuple): Size of the figure.
-        adjusted (bool): Whether to use adjusted confidence intervals (if true, divide z by sqrt(n - k) for k > 0)
-    Returns
-    -------
-    ax : matplotlib.axes.Axes
-        The axes object with the plot.
+    
+    Parameters
+    ----------
+    x, y : array-like
+        Input time series.
+    lags : int
+        Number of lags to include in the plot.
+    alpha : float
+        Significance level for confidence intervals.
+    figsize : tuple
+        Figure size.
+    adjusted : bool
+        If True, use lag-specific CI (sqrt(n-k)); 
+        if False, use fixed CI (sqrt(n)).
     """
-    # Compute CCF and confidence interval
+    n = len(y)
     z = NormalDist().inv_cdf(1 - alpha/2)
     cross_corrs = ccf(x, y)
-    # ci = 2 / np.sqrt(len(y))
-    ci = z / np.sqrt(len(y) - lags) if adjusted else z / np.sqrt(len(y))
+
+    if adjusted:
+        ci = [z / np.sqrt(n - k) for k in range(lags + 1)]
+    else:
+        ci = [z / np.sqrt(n)] * (lags + 1)
+
     # Create plot
     fig, ax = plt.subplots(figsize=figsize)
     ax.stem(range(0, lags + 1), cross_corrs[: lags + 1])
-    ax.fill_between(range(0, lags + 1), ci, y2=-ci, alpha=0.2)
-    ax.set_title("Cross-correlation")
+    ax.fill_between(range(0, lags + 1), ci, y2=[-c for c in ci], alpha=0.2)
+    ax.set_title(f"Cross-correlation function (CCF)")
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     return ax
