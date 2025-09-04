@@ -1430,12 +1430,25 @@ def tune_ets(data, param_space, cv_splits, horizon, eval_metric, eval_num, step_
             
             hw_forecast = hw_fit.forecast(len(test))
             forecast_filled = np.nan_to_num(hw_forecast, nan=0)
-            accuracy = eval_metric(test, forecast_filled)
+
+            #Evaluate using the specified metric
+            if eval_metric.__name__ in ["MASE", "SMAE", "SRMSE", "RMSSE"]:
+                accuracy = eval_metric(test,
+                                    forecast_filled,
+                                    train)
+            else:
+                accuracy = eval_metric(
+                        test,
+                        forecast_filled,
+                    )
+
+            # accuracy = eval_metric(test, forecast_filled)
             metric.append(accuracy)
             
         score = np.mean(metric)
         if verbose ==True:
             print ("SCORE:", score)
+
         return {'loss':score, 'status':STATUS_OK}
     
     # Perform hyperparameter optimization using Hyperopt
