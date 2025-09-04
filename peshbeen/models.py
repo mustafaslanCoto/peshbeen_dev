@@ -157,9 +157,9 @@ class ml_forecaster:
                     if self.trend == "linear":
                         dfc[self.target_col] = dfc[self.target_col] - trend
                 if self.trend in ["ets", "feature_ets"]:
-                    self.ets_model = ExponentialSmoothing(dfc[self.target_col], **self.ets_model).fit(**self.ets_fit)
+                    self.ets_model_fit = ExponentialSmoothing(dfc[self.target_col], **self.ets_model).fit(**self.ets_fit)
                     if self.trend == "ets":
-                        dfc[self.target_col] = dfc[self.target_col] - self.ets_model.fittedvalues.values
+                        dfc[self.target_col] = dfc[self.target_col] - self.ets_model_fit.fittedvalues.values
 
             # Apply differencing if specified
             if self.difference is not None or self.season_diff is not None:
@@ -258,7 +258,7 @@ class ml_forecaster:
                 # trend_forecast = np.array(self.lr_model.predict(future_time)) # Predicting trend
                 trend_forecast= forecast_trend(model = self.lr_model, H=H, start=self.len, breakpoints=self.cps)
             else:  # ets or feature_ets
-                trend_forecast = np.array(self.ets_model.forecast(H))
+                trend_forecast = np.array(self.ets_model_fit.forecast(H))
 
         for i in range(H):
             # If external regressors are provided, extract the i-th row
