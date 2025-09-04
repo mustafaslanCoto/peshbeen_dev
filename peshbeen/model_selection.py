@@ -1722,6 +1722,7 @@ def cv_tune(
     param_space,
     eval_metric,
     lag_space=None,
+    starting_lags=None,
     transform_space=None,
     step_size=None,
     opt_horizon=None,
@@ -1745,6 +1746,8 @@ def cv_tune(
         Hyperopt parameter search space.
     lag_space : int, optional
         Maximum number of lags to consider for each variable. Defaults to None (no lag).
+    starting_lags : list, optional
+        List of starting lags for each variable. Defaults to None (no starting lags).
     transform_space : int, optional
         Possible transformations to consider for each variable. Defaults to None (no transformation).
     eval_metric : callable
@@ -1791,7 +1794,12 @@ def cv_tune(
         return {k: v for k, v in params.items() if k not in skip_keys}
     
     if lag_space is not None:
-        lag_postions = {f"lag_{i}": hp.choice(f"lag_{i}", [0, 1]) for i in range(1, lag_space + 1)}
+        lags_to_consider = list(range(1, lag_space + 1))
+        if starting_lags is not None:
+            # if list of starting_lags is provided, ensure they are not in lags_to_consider
+            lags_to_consider = [lag for lag in lags_to_consider if lag not in starting_lags]
+
+        lag_postions = {f"lag_{i}": hp.choice(f"lag_{i}", [0, 1]) for i in lags_to_consider}
         search_space = {**lag_postions, **param_space}
     else:
         search_space = {**param_space}
@@ -1810,7 +1818,10 @@ def cv_tune(
             model_params = _get_model_params_for_fit(params)
 
         if lag_space is not None:
-            selected_lags = [i for i in range(1, lag_space+1) if params[f"lag_{i}"] == 1]
+            if starting_lags is not None:
+                selected_lags = starting_lags + [i for i in lags_to_consider if params[f"lag_{i}"] == 1]
+            else:
+                selected_lags = [i for i in lags_to_consider if params[f"lag_{i}"] == 1]
             model.n_lag = selected_lags
 
         if transform_space is not None:
