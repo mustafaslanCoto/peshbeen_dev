@@ -1879,9 +1879,10 @@ def cv_tune(
     best_lag_values = []
     best_transforms = []
     if lag_space is not None:
-        best_lag_indexes = [value for key, value in sorted(((k, v) for k, v in best_hyperparams.items() if k.startswith("lag_")),
-                                                          key=lambda x: int(x[0].split("_")[1]))]
-        best_lag_values = [i for i in range(1, lag_space + 1) if best_lag_indexes[i-1]==1]
+        best_lag_values = sorted(int(k.split("_")[1]) for k, v in best_hyperparams.items() if k.startswith("lag_") and v == 1)
+        if starting_lags is not None:
+            best_lag_values = sorted(list(set(best_lag_values).union(set(starting_lags))))
+            
     if transform_space is not None:
         best_transform_orig = [v for v in best_hyperparams.values() if v in transform_space]
         # get the name of transforms
