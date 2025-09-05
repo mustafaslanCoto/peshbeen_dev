@@ -53,13 +53,12 @@ def forward_feature_selection(df, n_folds = None, H = None, model = None, metric
         if starting_lags is not None:
             if not isinstance(starting_lags, list):
                 raise ValueError("starting_lags should be a list of integers.")
-            model.lags = starting_lags
+            model.n_lag = starting_lags
             remaining_lags = [x for x in remaining_lags if x not in starting_lags]
 
     if candidate_features is not None:
-        candidate_features = candidate_features.copy()
-        df = df.drop(columns=candidate_features)
         df_orig = df.copy() # Keep original for feature add-back
+        df = df.drop(columns=candidate_features)
 
     if transformations is not None:
         if starting_transforms is not None:
@@ -97,6 +96,10 @@ def forward_feature_selection(df, n_folds = None, H = None, model = None, metric
             return cv_result["score"].tolist()
         else:
             return cv_result["score"].values[0]
+    # Initial score with starting features
+    if starting_lags is not None or starting_transforms is not None:
+        model_start = model.copy()
+        best_score = validation(model_start, df)
 
     while True:
         improvement = False
@@ -612,8 +615,8 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
             remaining_lags = [x for x in remaining_lags if x not in starting_lags]
 
     if candidate_features is not None:
-        df = df.drop(columns=candidate_features)
         df_orig = df.copy() # Keep original for feature add-ba
+        df = df.drop(columns=candidate_features)
     if transformations is not None:
         if starting_transforms is not None:
             if not isinstance(starting_transforms, list):
@@ -684,6 +687,11 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
 
         return score
 
+    # Initial score with starting features
+    if starting_lags is not None or starting_transforms is not None:
+        model_start = model.copy()
+        model_start = model_update(model_start, df)
+        best_score = validation(model_start, df)
 
     while True:
         improvement = False
