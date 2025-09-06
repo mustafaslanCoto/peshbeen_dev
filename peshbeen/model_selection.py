@@ -578,7 +578,7 @@ def mv_backward_feature_selection(df, target_col, n_folds = None, H = None, mode
 def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, metrics = None,
                                   lags_to_consider = None, candidate_features = None, transformations = None, 
                                     step_size = None, starting_lags = None, starting_transforms = None,
-                                    validation_type = "cv", iterations = 10, tol = 1e-4, verbose = False):
+                                    validation_type = "cv", iterations = 10, verbose = False):
     """
     Performs forward lag/feature/transform selection for Regression models.
     Parameters:
@@ -595,7 +595,6 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
         starting_transforms (list, optional): List of starting transformations.
         validation_type (str, optional): Type of validation to use ("cv", "BIC", "AIC" or both "AIC_BIC"). if "AIC_BIC" are both selected, the model will be evaluated using both criteria.
         iterations (int, optional): Number of iterations for model fitting to update parameters.
-        tol (float, optional): Tolerance for convergence.
         verbose (bool, optional): Whether to print progress messages.
     Returns:
         dict: Dictionary of best features
@@ -651,26 +650,17 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
             return score < best_s
 
 # After each feature selection step iterate model to make sure parameters are updated like transition probabilities and stds
-    def model_update(model_test, df_test, iterations=iterations, tol=tol):
+    def model_update(model_test, df_test, iterations=iterations):
         model_test.data_prep(df_test) # update data preparation because if new lags to be consistent with coefficients
         model_test.compute_coeffs() # update model coefficients because of new lags
-        prev_ll = model_test.LL
-        for _ in range(iterations):
-            model_test.fit(df_test)
-            ll = model_test.LL
-            if abs(ll - prev_ll) < tol:
-                # print iteration number
-                # print(f"Converged after {_} iterations")
-                break
-            else:
-                prev_ll = ll
+        model_test.fit(df_test, n_iter=iterations) # update model parameters like transition probs and stds
         return model_test
     
 
     def validation(model_test, df_test):
         if validation_type == "cv":
             cv_result = hmm_cross_validate(model=model_test, df=df_test, cv_split=n_folds, test_size=H,
-                                metrics=metrics, step_size=step_size)
+                                metrics=metrics, step_size=step_size, n_iter=iterations)
     
             if isinstance(metrics, list):
                 score = cv_result["score"].tolist()
@@ -783,7 +773,7 @@ def hmm_forward_feature_selection(df, n_folds = None, H = None, model = None, me
 
 def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, metrics = None,
                                   lags_to_consider = None, candidate_features = None, transformations = None, 
-                                    step_size = None, validation_type = "cv", iterations = 10, tol = 1e-4, verbose = False):
+                                    step_size = None, validation_type = "cv", iterations = 10, verbose = False):
     """
     Performs backward lag selection for Regression models.
     Parameters:
@@ -798,7 +788,6 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
         step_size (int, optional): Step size for rolling window.
         validation_type (str, optional): Type of validation to use ("cv", "BIC", "AIC" or both "AIC_BIC"). if "AIC_BIC" are both selected, the model will be evaluated using both criteria.
         iterations (int, optional): Number of iterations for model fitting to update parameters.
-        tol (float, optional): Tolerance for convergence.
         verbose (bool, optional): Whether to print progress messages.
     Returns:
         dict: Dictionary of best features
@@ -836,27 +825,18 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
             return score < best_s
         
 # After each feature selection step iterate model to make sure parameters are updated like transition probabilities and stds
-    def model_update(model_test, df_test, iterations=iterations, tol=tol):
+    def model_update(model_test, df_test, iterations=iterations):
         model_test.data_prep(df_test) # update data preparation because if new lags to be consistent with coefficients
         model_test.compute_coeffs() # update model coefficients because of new lags
-        prev_ll = model_test.LL
-        for _ in range(iterations):
-            model_test.fit(df_test)
-            ll = model_test.LL
-            if abs(ll - prev_ll) < tol:
-                # print iteration number
-                # print(f"Converged after {_} iterations")
-                break
-            else:
-                prev_ll = ll
+        model_test.fit(df_test, n_iter=iterations) # update model parameters like transition probs and stds
         return model_test
     
 
     def validation(model_test, df_test):
         if validation_type == "cv":
             cv_result = hmm_cross_validate(model=model_test, df=df_test, cv_split=n_folds, test_size=H,
-                                metrics=metrics, step_size=step_size)
-    
+                                metrics=metrics, step_size=step_size, n_iter=iterations)
+
             if isinstance(metrics, list):
                 score = cv_result["score"].tolist()
             else:
@@ -953,7 +933,7 @@ def hmm_backward_feature_selection(df, n_folds = None, H = None, model = None, m
 def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model = None, metrics = None,
                                   lags_to_consider = None, candidate_features = None, transformations = None, 
                                     step_size = None, starting_lags = None, starting_transforms = None,
-                                    validation_type = "cv", iterations = 10, tol = 1e-4, verbose = False):
+                                    validation_type = "cv", iterations = 10, verbose = False):
     """
     Performs forward lag selection for Vektor Autoregressive models and bidirectional ml models
     Parameters:
@@ -1025,27 +1005,18 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
             return score < best_s
 
 # After each feature selection step iterate model to make sure parameters are updated like transition probabilities and stds
-    def model_update(model_test, df_test, iterations=iterations, tol=tol):
+    def model_update(model_test, df_test, iterations=iterations):
         model_test.data_prep(df_test) # update data preparation because if new lags to be consistent with coefficients
         model_test.compute_coeffs() # update model coefficients because of new lags
-        prev_ll = model_test.LL
-        for _ in range(iterations):
-            model_test.fit(df_test)
-            ll = model_test.LL
-            if abs(ll - prev_ll) < tol:
-                # print iteration number
-                # print(f"Converged after {_} iterations")
-                break
-            else:
-                prev_ll = ll
+        model_test.fit(df_test, n_iter=iterations) # update model parameters like transition probs and stds
         return model_test
     
 
     def validation(model_test, df_test):
         if validation_type == "cv":
             cv_result = hmm_mv_cross_validate(model = model_test, df=df_test, cv_split=n_folds, test_size=H,
-                                        metrics = metrics, step_size= step_size)
-    
+                                        metrics = metrics, step_size= step_size, n_iter=iterations)
+
             if isinstance(metrics, list):
                 score = cv_result[target_col].tolist()
             else:
@@ -1163,7 +1134,7 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
 
 def hmm_mv_backward_feature_selection(df, target_col, n_folds = None, H = None, model = None, metrics = None,
                                   lags_to_consider = None, candidate_features = None, transformations = None, 
-                                    step_size = None, validation_type = "cv", iterations = 10, tol = 1e-4, 
+                                    step_size = None, validation_type = "cv", iterations = 10, 
                                     verbose = False):
     """
     Performs backward lag selection for Regression models.
@@ -1216,27 +1187,18 @@ def hmm_mv_backward_feature_selection(df, target_col, n_folds = None, H = None, 
             return score < best_s
 
 # After each feature selection step iterate model to make sure parameters are updated like transition probabilities and stds
-    def model_update(model_test, df_test, iterations=iterations, tol=tol):
+    def model_update(model_test, df_test, iterations=iterations):
         model_test.data_prep(df_test) # update data preparation because if new lags to be consistent with coefficients
         model_test.compute_coeffs() # update model coefficients because of new lags
-        prev_ll = model_test.LL
-        for _ in range(iterations):
-            model_test.fit(df_test)
-            ll = model_test.LL
-            if abs(ll - prev_ll) < tol:
-                # print iteration number
-                # print(f"Converged after {_} iterations")
-                break
-            else:
-                prev_ll = ll
+        model_test.fit(df_test, n_iter=iterations) # update model parameters like transition probs and stds
         return model_test
     
 
     def validation(model_test, df_test):
         if validation_type == "cv":
             cv_result = hmm_mv_cross_validate(model = model_test, df=df_test, cv_split=n_folds, test_size=H,
-                                        metrics = metrics, step_size= step_size)
-    
+                                        metrics = metrics, step_size= step_size, n_iter=iterations)
+
             if isinstance(metrics, list):
                 score = cv_result[target_col].tolist()
             else:
@@ -2182,7 +2144,9 @@ def cv_lag_tune(
 # HMM CV utility function
 #------------------------------------------------------------------------------
 
-def hmm_cross_validate(model, df, cv_split, test_size, metrics, learn_per_fold = None, step_size= None):
+def hmm_cross_validate(model, df, cv_split,
+                       test_size, metrics,
+                       n_iter=1, step_size=None):
     """
     Run cross-validation using time series splits.
 
@@ -2192,9 +2156,7 @@ def hmm_cross_validate(model, df, cv_split, test_size, metrics, learn_per_fold =
         cv_split (int): Number of splits in TimeSeriesSplit.
         test_size (int): Size of test window.
         metrics (list): List of metric functions.
-        learn (bool): If True, learn parameters on the entire dataset, otherwise fit the model on each fold.
-        learn_per_fold (str): If "first", learns parameters on the first fold and fits on the rest,
-        if "all", learns on all folds, if "None", do not learn, just fit the model.
+        n_iter (int): Number of iterations for HMM fitting.
         step_size (int): Step size for time series cross-validation.
     
     Returns:
@@ -2209,14 +2171,14 @@ def hmm_cross_validate(model, df, cv_split, test_size, metrics, learn_per_fold =
 
         # If it is first fold, fit the model
         model_ = model.copy()
-        if (idx == 0) and (learn_per_fold in ["first", "all"]):
-            model_.fit_em(train)
-        # If learning per fold, learn the model on each fold
-        elif (learn_per_fold == "all") and (idx != 0):
-            model_.fit_em(train)
-        # If not learning per fold, fit the model on the first fold
-        else: # learn_per_fold == "None" or learn_per_fold == "first" for remaining folds
-            model_.fit(train)
+        # if (idx == 0) and (learn_per_fold in ["first", "all"]):
+        #     model_.fit_em(train)
+        # # If learning per fold, learn the model on each fold
+        # elif (learn_per_fold == "all") and (idx != 0):
+        #     model_.fit_em(train)
+        # # If not learning per fold, fit the model on the first fold
+        # else: # learn_per_fold == "None" or learn_per_fold == "first" for remaining folds
+        model_.fit(train, n_iter=n_iter)
 
         # Forecast using the model
         bb_forecast = model_.forecast(test_size, x_test)
@@ -2230,7 +2192,9 @@ def hmm_cross_validate(model, df, cv_split, test_size, metrics, learn_per_fold =
     overall_performance = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
     return pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
 
-def hmm_mv_cross_validate(model, df, cv_split, test_size, metrics, learn_per_fold=None, step_size=None):
+def hmm_mv_cross_validate(model, df, cv_split,
+                          test_size, metrics,
+                          n_iter=1, step_size=None):
     """
     Cross-validate the bidirectional Vector Autoregressive Hidden Markov model.
     Args:
@@ -2238,7 +2202,7 @@ def hmm_mv_cross_validate(model, df, cv_split, test_size, metrics, learn_per_fol
         cv_split (int): Number of folds.
         test_size (int): Forecast window for each split.
         metrics (list): List of evaluation metric functions.
-        learn_per_fold (str, optional): Learning strategy for each fold. If "first", learns on the first fold only. If "all", learns on all folds. If "None", does not learn, just fits the model.
+        n_iter (int, optional): Number of iterations for HMM fitting.
         step_size (int, optional): Step size for time series cross-validation.
     Returns:
         pd.DataFrame: CV performance metrics for each target variable.
@@ -2253,16 +2217,17 @@ def hmm_mv_cross_validate(model, df, cv_split, test_size, metrics, learn_per_fol
         # y_test2 = np.array(test[model.target_cols[1]])
 
         # If it is first fold, fit the model
-        if (idx == 0) and (learn_per_fold in ["first", "all"]):
-            model.fit_em(train)
-        # If learning per fold, learn the model on each fold
-        elif (learn_per_fold == "all") and (idx != 0):
-            model.fit_em(train)
-        # If not learning per fold, fit the model on the first fold
-        else: # learn_per_fold == "None" or learn_per_fold == "first" for remaining folds
-            model.fit(train)
+        model_ = model.copy()
+        # if (idx == 0) and (learn_per_fold in ["first", "all"]):
+        #     model.fit_em(train)
+        # # If learning per fold, learn the model on each fold
+        # elif (learn_per_fold == "all") and (idx != 0):
+        #     model.fit_em(train)
+        # # If not learning per fold, fit the model on the first fold
+        # else: # learn_per_fold == "None" or learn_per_fold == "first" for remaining folds
+        model_.fit(train, n_iter=n_iter)
 
-        forecasts = model.forecast(test_size, x_test) # dictionary of forecasts for all target columns
+        forecasts = model_.forecast(test_size, x_test) # dictionary of forecasts for all target columns
         for m in metrics:
             if m.__name__ in ['MASE', 'SMAE', 'SRMSE', 'RMSSE']:
                 val = [m(test[target_col], forecasts[target_col], train[target_col]) for target_col in model.target_col]

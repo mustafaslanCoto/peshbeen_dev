@@ -1428,31 +1428,25 @@ class MsHmmRegression:
             prev_ll = self.LL
         return self.LL
 
-    def fit(self, df):
+    def fit(self, df, n_iter=1):
         """
         Refit the HMM regression model on new training data (log-domain version).
         """
+        if n_iter < 1:
+            raise ValueError("n_iter must be at least 1.")
+        
         self.data_prep(df)
-        self.EM()
+        if n_iter > 1:
+            prev_ll = self.LL
+            for _ in range(n_iter):
+                self.EM()
+                if abs(self.LL - prev_ll) < self.tol:
+                    break
+                else:
+                    prev_ll = self.LL
+        else:
+            self.EM()
 
-        # N, T = self.N, self.T
-        # logpi = np.log(self.pi + 1e-300)
-        # logA = np.log(self.A + 1e-300)
-        # logB = self._log_emissions()
-        # log_alpha = np.zeros((N, T))
-
-        # # Initialization
-        # for i in range(N):
-        #     log_alpha[i, 0] = logpi[i] + logB[i, 0]
-
-        # # Recursion
-        # for t in range(1, T):
-        #     for j in range(N):
-        #         log_alpha[j, t] = logB[j, t] + logsumexp(log_alpha[:, t-1] + logA[:, j])
-
-        # # Sequence log-likelihood
-        # self.LL = logsumexp(log_alpha[:, -1])
-        # self.log_alpha = log_alpha
         return self.LL
     
     def predict_states(self):
@@ -1963,31 +1957,25 @@ class MsHmmVar:
     # Fit model with learned parameters
     # -----------------------------
 
-    def fit(self, df_train):
+    def fit(self, df, n_iter=1):
         """
-        Refit the HMM-VAR model on new training data (log-domain version).
+        Refit the HMM-VAR model on new training data
         """
-        self.data_prep(df_train)
-        # N, T = self.N, self.T
-        # logpi = np.log(self.pi + 1e-300)
-        # logA = np.log(self.A + 1e-300)
-        # log_alpha = np.zeros((N, T))
-        # logB  = self._log_emissions()
+        if n_iter < 1:
+            raise ValueError("n_iter must be at least 1.")
+        
+        self.data_prep(df)
+        if n_iter > 1:
+            prev_ll = self.LL
+            for _ in range(n_iter):
+                self.EM()
+                if abs(self.LL - prev_ll) < self.tol:
+                    break
+                else:
+                    prev_ll = self.LL
+        else:
+            self.EM()
 
-        # # Initialization
-        # for i in range(N):
-        #     log_alpha[i, 0] = logpi[i] + logB[i, 0]
-
-        # # Recursion
-
-        # for t in range(1, T):
-        #     for j in range(N):
-        #         log_alpha[j, t] = logB[j, t] + logsumexp(log_alpha[:, t-1] + logA[:, j])
-
-        # # Sequence log-likelihood
-        # self.LL = logsumexp(log_alpha[:, -1])
-        # self.log_forward = log_alpha
-        self.EM()
         return self.LL
 
     def predict_states(self):
