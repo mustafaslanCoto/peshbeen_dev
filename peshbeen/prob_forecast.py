@@ -3,6 +3,7 @@ import pandas as pd
 from statsforecast.models import ARIMA, AutoARIMA, TBATS, AutoTBATS
 from peshbeen.model_selection import ParametricTimeSeriesSplit
 from scipy.stats import gaussian_kde
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
 class ml_conformalizer():
     """
@@ -249,7 +250,127 @@ class hmm_conformalizer():
         self.sampled_forecasts = pd.DataFrame(sampled_predictions, columns=[f'h_{i+1}' for i in range(self.H)])
         # generate quantiles from sampled predictions
         return self.conformalized_sample_predictions
-# hmm_best_models_fourier.to_excel("model_params/hmm_best_models_fourier.xlsx", index=False)
+
+
+class ets_conformalizer():
+    """
+    Conformal prediction for time series forecasting. It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
+    Parameters:
+    - delta: significance level for prediction intervals
+    - ets_param: parameters for ETS model. A tuble of (dict, dict) where first dict is for ExponentialSmoothing() and second dict is for .fit()
+    - n_calibration: number of calibration windows
+    - H: forecast horizon
+    - sliding_window: size of the sliding window for cross-validation
+    - verbose: whether to print progress messages
+    """
+    def __init__(self, delta, ets_param, n_calibration, H, sliding_window=1, verbose=False):
+        self.delta = delta
+        self.ets_param = ets_param
+        self.sliding_window = sliding_window
+        self.n_calib = n_calibration
+        self.verbose = verbose
+        self.H = H
+
+    def non_conformity_scores(self, series):
+        c_actuals, c_forecasts = [], []
+        # Create time series cross-validator that slides 1 time step for each training window
+        tscv = ParametricTimeSeriesSplit(n_splits=self.n_calib, test_size=self.H, step_size=self.sliding_window)
+
+        for train_index, test_index in tscv.split(series):
+            train, test = series[train_index], series[test_index]
+            y_test = np.array(test)
+            self.model = ExponentialSmoothing(train,
+                            **self.ets_param[0]).fit(**self.ets_param[1])
+            H_forecasts = np.array(self.model.forecast(self.H))
+            c_forecasts.append(H_forecasts)
+            c_actuals.append(y_test)
+            if self.verbose:
+                print(f"Completed calibration window {len(c_forecasts)} out of {self.n_calib}")
+        self.resid = np.column_stack(c_actuals) - np.column_stack(c_forecasts) # Residuals n_calib*H
+        self.non_conform = np.abs(self.resid) # non-conformity scores
+
+        
+    def calculate_quantile(self, scores_calib):
+        # Vectorized quantile calculation for list delta
+        if isinstance(self.delta, float):
+            which_quantile = np.ceil(self.delta * (self.n_calib + 1)) / self.n_calib
+            return np.quantile(scores_calib, which_quantile, method="lower", axis=0)
+        elif isinstance(self.delta, list):
+            which_quantiles = np.ceil(np.array(self.delta) * (self.n_calib + 1)) / self.n_calib
+            return np.array([np.quantile(scores_calib, q, method="lower", axis=0) for q in which_quantiles])
+        else:
+            raise ValueError("delta must be float or list of floats.")
+    
+    def calibrate(self, series):
+        self.non_conformity_scores(series)
+        h_quantiles = []
+        for i in range(self.H):
+            q_hat = self.calculate_quantile(self.non_conform[i])
+            h_quantiles.append(q_hat)
+        self.q_hat_D = np.array(h_quantiles)
+
+    # Generate prediction intervals using the calibrated quantiles
+
+    def generate_prediction_intervals(self, series):
+        # Only calibrate if not already done
+        if not hasattr(self, 'q_hat_D'):
+            raise RuntimeError("Conformalizer must be calibrated before generating prediction intervals. Run .calibrate(df_calibration) first.")
+        self.model = ExponentialSmoothing(series,
+                            **self.ets_param[0]).fit(**self.ets_param[1])
+        y_forecast = np.array(self.model.forecast(self.H))
+        result = [y_forecast]
+        col_names = ["point_forecast"]
+
+        if isinstance(self.delta, float):
+            y_lower, y_upper = y_forecast - self.q_hat_D, y_forecast + self.q_hat_D
+            result.extend([y_lower, y_upper])
+            col_names.extend([f'lower_{int(self.delta*100)}', f'upper_{int(self.delta*100)}'])
+        elif isinstance(self.delta, list):
+            for idx, d in enumerate(self.delta):
+                y_lower = y_forecast - self.q_hat_D[:, idx]
+                y_upper = y_forecast + self.q_hat_D[:, idx]
+                result.extend([y_lower, y_upper])
+                col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
+        # distributions for each horizons. So add y_forecast array to each columns of self.resid and equal to self.dist
+        dist = y_forecast[:, None] + self.resid
+        self.dist = pd.DataFrame(dist.T, columns=[f'h_{i+1}' for i in range(self.H)])
+        return pd.DataFrame(np.column_stack(result), columns=col_names)
+
+    def sample_predictions(self, series, samples=1000):
+        """
+        Generate samples from the predictive distribution generated by residuals from conformal prediction.
+        The samples are drawn from a Gaussian kernel density estimate of the residuals.
+        """
+        # Return a random sample from Gaussian Kernel density estimation
+        if not hasattr(self, 'resid'):
+            raise RuntimeError("Residuals not available. Run .non_conformity_scores(df) .calibrate(df) or  first.")
+
+        self.model = ExponentialSmoothing(series,
+                            **self.ets_param[0]).fit(**self.ets_param[1])
+        y_forecast = np.array(self.model.forecast(self.H))
+
+        sampled_resids = np.column_stack([gaussian_kde(self.resid[:, i]).resample(size=samples)[0] for i in range(self.H)]) #  sample from the distribution approximated by KDE
+        sampled_predictions = sampled_resids + y_forecast[:, None].T # add the forecast to the sampled residuals
+
+        # Generate conformal prediction intervals using sampled residuals
+        result = [y_forecast]
+        col_names = ["point_forecast"]
+        # absolute sample residuals for non-conformity scores:
+        abs_sampled_resids = np.abs(sampled_resids)
+        quantiles = self.calculate_quantile(abs_sampled_resids)
+        if isinstance(self.delta, float):
+            y_lower, y_upper = y_forecast - quantiles, y_forecast + quantiles
+            result.extend([y_lower, y_upper])
+            col_names.extend([f'lower_{int(self.delta*100)}', f'upper_{int(self.delta*100)}'])
+        elif isinstance(self.delta, list):
+            for idx, d in enumerate(self.delta):
+                y_lower, y_upper = y_forecast - quantiles[idx], y_forecast + quantiles[idx]
+                result.extend([y_lower, y_upper])
+                col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
+        self.conformalized_sample_predictions = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.sampled_forecasts = pd.DataFrame(sampled_predictions, columns=[f'h_{i+1}' for i in range(self.H)])
+        # generate quantiles from sampled predictions
+        return self.conformalized_sample_predictions
     
 class s_arima_conformalizer():
     def __init__(self, model, delta, n_windows, H, calib_metric = "mae"):
