@@ -40,6 +40,8 @@ class ml_conformalizer():
                 print(f"Completed calibration window {len(c_forecasts)} out of {self.n_calib}")
         self.resid = np.column_stack(c_actuals) - np.column_stack(c_forecasts) # Residuals n_calib*H
         self.non_conform = np.abs(self.resid) # non-conformity scores
+        self.c_actuals = np.column_stack(c_actuals)
+        self.c_forecasts = np.column_stack(c_forecasts)
 
         
     def calculate_quantile(self, scores_calib):
@@ -164,6 +166,8 @@ class hmm_conformalizer():
                 print(f"Completed calibration window {len(c_forecasts)} out of {self.n_calib}")
         self.resid = np.column_stack(c_actuals) - np.column_stack(c_forecasts) # Residuals n_calib*H
         self.non_conform = np.abs(self.resid) # non-conformity scores
+        self.c_actuals = np.column_stack(c_actuals)
+        self.c_forecasts = np.column_stack(c_forecasts)
 
         
     def calculate_quantile(self, scores_calib):
@@ -289,8 +293,9 @@ class ets_conformalizer():
                 print(f"Completed calibration window {len(c_forecasts)} out of {self.n_calib}")
         self.resid = np.column_stack(c_actuals) - np.column_stack(c_forecasts) # Residuals n_calib*H
         self.non_conform = np.abs(self.resid) # non-conformity scores
+        self.c_actuals = np.column_stack(c_actuals)
+        self.c_forecasts = np.column_stack(c_forecasts)
 
-        
     def calculate_quantile(self, scores_calib):
         # Vectorized quantile calculation for list delta
         if isinstance(self.delta, float):
