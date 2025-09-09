@@ -1511,6 +1511,8 @@ class MsHmmRegression:
         log_alpha -= logsumexp(log_alpha, axis=0)
         self.forecast_forward = np.exp(log_alpha)
         self.state_forecasts = np.argmax(self.forecast_forward, axis=0)
+        #per state forecasts
+        self.forecast_ps = np.zeros((N, H))
 
         # Prepare for trend adjustment
         # This assumes you stored original target (pre-trend removal) in self.target_orig
@@ -1539,6 +1541,7 @@ class MsHmmRegression:
             for j in range(N):
                 mu = np.dot(self.coeffs[j], inp)
                 state_preds[j] = mu
+            self.forecast_ps[:, t] = state_preds
 
             # normalize to probabilities
 
@@ -1553,14 +1556,21 @@ class MsHmmRegression:
 
         if self.trend is not None:
             forecasts += trend_forecast
+            self.forecast_ps += trend_forecast
 
         # --- Revert seasonal differencing if applied ---
         if self.season_diff is not None:
             forecasts = invert_seasonal_diff(self.orig_d, forecasts, self.season_diff)
+            # Also revert seasonal differencing for per state forecasts
+            for s in range(self.N):
+                self.forecast_ps[s] = invert_seasonal_diff(self.orig_d, self.forecast_ps[s], self.season_diff)
 
         # --- Revert regular differencing if applied ---
         if self.diff is not None:
             forecasts = undiff_ts(self.orig, forecasts, self.diff)
+            # Also revert differencing for per state forecasts
+            for s in range(self.N):
+                self.forecast_ps[s] = undiff_ts(self.orig, self.forecast_ps[s], self.diff)
 
         # --- Box-Cox back-transform if applied ---
         if self.box_cox:
@@ -1568,6 +1578,11 @@ class MsHmmRegression:
                 y_pred=forecasts, lmda=self.lamda,
                 shift=self.is_zero, box_cox_biasadj=self.biasadj
             )
+            for s in range(self.N):
+                self.forecast_ps[s] = back_box_cox_transform(
+                    y_pred=self.forecast_ps[s], lmda=self.lamda,
+                    shift=self.is_zero, box_cox_biasadj=self.biasadj
+                )
 
         return forecasts
 # Hidden Markov Model with Vector Autoregressive (VAR)
