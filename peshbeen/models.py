@@ -1096,6 +1096,15 @@ class ml_bidirect_forecaster:
         return forecasts
 
 # Hidden Markov Model with Regression
+    # def __init__(self, n_components, target_col, lags, method="posterior",
+    #             startprob_prior=1e3, transmat_prior=1e5, add_constant=True,
+    #             difference=None, trend=None, ets_params = None, change_points=None,
+    #             cat_variables=None, lag_transform=None, n_iter=100, tol=1e-6,
+    #             coefficients=None, stds=None, init_state=None, trans_matrix=None,
+    #             box_cox=False, lamda=None, box_cox_biasadj=False, season_diff=None,
+    #             ridge=1e-5, var_floor=1e-5, 
+    #             random_state=None, verbose=False):
+    
 class MsHmmRegression:
     """
     Hidden Markov Model Regression for time series with EM parameter estimation.
@@ -1128,8 +1137,7 @@ class MsHmmRegression:
                  difference=None, trend=None, ets_params = None, change_points=None,
                  cat_variables=None, lag_transform=None, n_iter=100, tol=1e-6,
                  coefficients=None, stds=None, init_state=None, trans_matrix=None,
-                 box_cox=False, lamda=None, box_cox_biasadj=False, season_diff=None,
-                 ridge=1e-5, var_floor=1e-5, 
+                 box_cox=False, lamda=None, box_cox_biasadj=False, season_diff=None, 
                  random_state=None, verbose=False):
         self.N = n_components
         self.target_col = target_col
@@ -1158,8 +1166,6 @@ class MsHmmRegression:
         self.lag_transform = lag_transform
         self.iter = n_iter
         self.tol = tol
-        self.ridge = ridge
-        self.var_floor = var_floor
         self.verb = verbose
 
 
@@ -1286,7 +1292,7 @@ class MsHmmRegression:
             return dfc.dropna()
 
 
-    def compute_coeffs(self, w_floor=1e-5):
+    def compute_coeffs(self, ridge=1e-5, var_floor=1e-5, w_floor=1e-5):
 
         # Update regression coefficients and stds for each state
 
@@ -1309,13 +1315,13 @@ class MsHmmRegression:
             sw = np.sqrt(w)
             Xw = X * sw[:, None]
             yw = self.y * sw
-            XtX = Xw.T @ Xw + self.ridge*np.eye(X.shape[1])
+            XtX = Xw.T @ Xw + ridge*np.eye(X.shape[1])
             Xty = Xw.T @ yw
             beta_s = np.linalg.lstsq(XtX, Xty, rcond=None)[0]
             coeffs.append(beta_s)
             resid = self.y - X @ beta_s
             var_s = (w * resid**2).sum() / max((w.sum()-beta_s.shape[0]), 1.0)
-            stds.append(np.sqrt(max(var_s, self.var_floor)))
+            stds.append(np.sqrt(max(var_s, var_floor)))
         self.coeffs = np.row_stack(coeffs)
         self.stds = np.array(stds)
 
