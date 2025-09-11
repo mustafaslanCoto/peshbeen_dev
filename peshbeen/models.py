@@ -1391,6 +1391,7 @@ class MsHmmRegression:
         A = np.maximum(A, 1e-12)
         A /= A.sum(axis=1, keepdims=True)
         self.A = A
+        self.pi = gamma[:, 0] / gamma[:, 0].sum()
         self.compute_coeffs() 
 
 
@@ -1878,6 +1879,7 @@ class MsHmmVar:
         A = np.maximum(A, 1e-12)
         A /= A.sum(axis=1, keepdims=True)
         self.A = A
+        self.pi = gamma[:, 0] / gamma[:, 0].sum()
         self.compute_coeffs() 
 
 
