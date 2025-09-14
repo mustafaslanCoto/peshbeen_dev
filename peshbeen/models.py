@@ -1129,6 +1129,7 @@ class MsHmmRegression:
         init_state (np.ndarray or None): Initial state distribution.
         trans_matrix (np.ndarray or None): Initial transition matrix.
         random_state (int or None): Random seed.
+        switching_var (bool): If True, allows if variance to switch between states.
         verbose (bool): Print progress if True.
     """
 
@@ -1138,7 +1139,7 @@ class MsHmmRegression:
                  cat_variables=None, lag_transform=None, n_iter=100, tol=1e-6,
                  coefficients=None, stds=None, init_state=None, trans_matrix=None,
                  box_cox=False, lamda=None, box_cox_biasadj=False, season_diff=None, 
-                 random_state=None, verbose=False):
+                 random_state=None, switching_var=True, verbose=False):
         self.N = n_components
         self.target_col = target_col
         self.diff = difference
@@ -1166,6 +1167,7 @@ class MsHmmRegression:
         self.lag_transform = lag_transform
         self.iter = n_iter
         self.tol = tol
+        self.switching_var = switching_var
         self.verb = verbose
 
 
@@ -1307,6 +1309,8 @@ class MsHmmRegression:
 
         coeffs = []
         stds = []
+        weighted_resid_all = []
+        weights_all = []
         X = self.X
         for s in range(self.N):
             # Add floor so state isn’t “killed”
@@ -1320,8 +1324,20 @@ class MsHmmRegression:
             beta_s = np.linalg.lstsq(XtX, Xty, rcond=None)[0]
             coeffs.append(beta_s)
             resid = self.y - X @ beta_s
-            var_s = (w * resid**2).sum() / max((w.sum()-beta_s.shape[0]), 1.0)
-            stds.append(np.sqrt(max(var_s, var_floor)))
+            # var_s = (w * resid**2).sum() / max((w.sum()-beta_s.shape[0]), 1.0)
+            # stds.append(np.sqrt(max(var_s, var_floor)))
+            weighted_resid_all.append(w * resid**2)
+            weights_all.append(w)
+
+            if self.switching_var:
+                var_s = (w * resid**2).sum() / max((w.sum()-beta_s.shape[0]), 1.0)
+                stds.append(np.sqrt(max(var_s, var_floor)))
+
+        if not self.switching_var:
+            # pooled variance across all states
+            pooled_var = (np.sum(weighted_resid_all)) / (np.sum(weights_all) - X.shape[1])
+            stds = [np.sqrt(max(pooled_var, var_floor))] * self.N
+
         self.coeffs = np.row_stack(coeffs)
         self.stds = np.array(stds)
 
@@ -1627,13 +1643,14 @@ class MsHmmVar:
         init_state (np.ndarray): Initial state probabilities.
         trans_matrix (np.ndarray): Initial transition matrix.
         random_state (int): Seed.
+        switching_cov (bool): If True, allows covariance to switch between states.
         verbose (bool): Print progress if True.
     """
     def __init__(self, n_components, target_col, lags, difference=None, method="posterior", covariance_type="full",
                  startprob_prior=1e3, transmat_prior=1e5, add_constant=True, cat_variables=None, lag_transform=None, seasonal_diff=None, trend=None,
                  ets_params = None, change_points=None,
                  n_iter=100, tol=1e-6, coefficients=None, init_state=None, trans_matrix=None, box_cox=None, lamda=None, box_cox_biasadj=False,
-                 random_state=None, verbose=False):
+                 random_state=None, switching_cov=True, verbose=False):
 
         self.N = n_components
         self.target_col = target_col
@@ -1651,6 +1668,7 @@ class MsHmmVar:
         self.tol = tol
         self.verb = verbose
         self.cvr = covariance_type
+        self.switching_cov = switching_cov
         self.coeffs = coefficients
         self.box_cox = box_cox
         if lamda is None:
@@ -1974,10 +1992,22 @@ class MsHmmVar:
             covs.append(cov_i)
             # var_s = (w * resid**2).sum() / max(w.sum(), 1.0)
         self.coeffs = np.stack(coeffs)
-        if self.cvr == "full":
-            self.covs = covs
-        elif self.cvr == "diag":
-            self.covs = [np.diag(np.diag(cov_i)) for cov_i in covs]
+        # if self.cvr == "full":
+        #     self.covs = covs
+        # elif self.cvr == "diag":
+        #     self.covs = [np.diag(np.diag(cov_i)) for cov_i in covs]
+
+            # Decide covariance structure
+        if not self.switching_cov:  # single covariance across all regimes
+            mean_cov = sum(covs) / self.N
+            if self.cvr == "diag":
+                mean_cov = np.diag(np.diag(mean_cov))
+            self.covs = [mean_cov for _ in range(self.N)]
+        else:  # different covariance per regime
+            if self.cvr == "full":
+                self.covs = covs
+            elif self.cvr == "diag":
+                self.covs = [np.diag(np.diag(cov_i)) for cov_i in covs]
 
     # -----------------------------
     # Fit model with learned parameters
