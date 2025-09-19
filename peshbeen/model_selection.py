@@ -1323,8 +1323,6 @@ def tune_ets(data, param_space, cv_splits, horizon, eval_metric, eval_num, step_
     Returns:
         tuple: Best model parameters and fit parameters.
     """
-
-    from sklearn.model_selection import TimeSeriesSplit
     from statsmodels.tsa.holtwinters import ExponentialSmoothing
     from hyperopt import fmin, tpe, hp, Trials, STATUS_OK, space_eval
     from hyperopt.pyll import scope
@@ -1340,7 +1338,10 @@ def tune_ets(data, param_space, cv_splits, horizon, eval_metric, eval_num, step_
             S = params.get('seasonal_periods') # Seasonal periods
             if params.get("damped_trend"): # Damped trend
                 damped_bool = params.get("damped_trend")
-                damp_trend = params.get('damping_trend')
+                if damped_bool:
+                    damp_trend = params.get('damping_trend')
+                else:
+                    damp_trend = None
             else:
                 damped_bool = params.get("damped_trend")
                 damp_trend = None
@@ -1442,6 +1443,10 @@ def tune_ets(data, param_space, cv_splits, horizon, eval_metric, eval_num, step_
         "smoothing_seasonal": best_params.get("smoothing_seasonal"),
         "damping_trend": best_params.get("damping_trend")
     }
+
+    
+    if set(model_params.keys()) == {"damped_trend"}: # if only damped_trend is in model_params, ensure it's False
+        model_params["damped_trend"] = False
 
     # Remove all keys with value None in a single step
     model_params = {k: v for k, v in model_params.items() if v is not None}
