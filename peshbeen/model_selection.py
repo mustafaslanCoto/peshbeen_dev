@@ -16,6 +16,9 @@ from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statistics import NormalDist
 import warnings
 warnings.filterwarnings("ignore")
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from tqdm import tqdm_notebook
+from itertools import product
 
 
 #------------------------------------------------------------------------------
@@ -1564,35 +1567,32 @@ def cv_hmm_lag_tune(
 # SARIMA Model Tuning
 #------------------------------------------------------------------------------
 
-def tune_sarima(y, d, D, season,p_range, q_range, P_range, Q_range, X=None):
+def tune_sarima(y, d, D, season,p, q, P, Q, X=None):
     """
     Finds the best SARIMA parameters using AIC as the evaluation metric.
     Args:
         y (array-like): The time series data.
         d (int): The non-seasonal differencing order.
+        d (int): The non-seasonal differencing order.
         D (int): The seasonal differencing order.
         season (int): The seasonal period.
-        p_range (list): Range of non-seasonal AR orders to test.
-        q_range (list): Range of non-seasonal MA orders to test.
-        P_range (list): Range of seasonal AR orders to test.
-        Q_range (list): Range of seasonal MA orders to test.
+        p (int): Max range of non-seasonal AR orders to test.
+        q (int): Max range of non-seasonal MA orders to test.
+        P (int): Max range of seasonal AR orders to test.
+        Q (int): Max range of seasonal MA orders to test.
         X (array-like, optional): Exogenous variables. Defaults to None.
     Returns:
         pd.DataFrame: A DataFrame containing the combinations of parameters and their corresponding AIC values.
     """
-    from statsmodels.tsa.statespace.sarimax import SARIMAX
-    from tqdm import tqdm_notebook
-    from itertools import product
     if X is not None:
         X = np.array(X, dtype = np.float64)
-    p = p_range
-    q = q_range # MA(q)
-    P = P_range # Seasonal autoregressive order.
-    Q = Q_range #Seasonal moving average order.
-    parameters = product(p, q, P, Q) # combinations of parameters(cartesian product)
-    parameters_list = list(parameters)
+    p_orders = range(0, p+1)
+    q_orders = range(0, q+1) # MA(q)
+    P_orders = range(0, P+1) # Seasonal autoregressive order.
+    Q_orders = range(0, Q+1) #Seasonal moving average order.
+    parameters = product(p_orders, q_orders, P_orders, Q_orders)
     result = []
-    for param in tqdm_notebook(parameters_list):
+    for param in tqdm_notebook(parameters):
         try:
             model = SARIMAX(endog=y, exog = X, order = (param[0], d, param[1]), seasonal_order= (param[2], D, param[3], season)).fit(disp = -1)
         except:
