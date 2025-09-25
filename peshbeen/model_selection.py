@@ -1641,6 +1641,38 @@ def cross_validate(model, df, cv_split, test_size, metrics, step_size=None):
     overall_performance = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
     return pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
 
+def arima_cross_validate(model, df, target_col, cv_split, test_size, metrics, step_size=None):
+    """
+    Run cross-validation using time series splits.
+
+    Args:
+        model (class): ARIMA model instance. Supports ARIMA from statsforecast (Nixtla).
+        df (pd.DataFrame): Input data.
+        target_col (str): Name of the target column.
+        cv_split (int): Number of splits in TimeSeriesSplit.
+        test_size (int): Size of test window.
+        metrics (list): List of metric functions.
+    
+    Returns:
+        pd.DataFrame: Performance metrics for CV.
+    """
+    tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
+    metrics_dict = {m.__name__: [] for m in metrics}
+    for train_index, test_index in tscv.split(df):
+        train, test = df.iloc[train_index], df.iloc[test_index]
+        x_test = test.drop(columns=[target_col]).to_numpy()
+        y_test = np.array(test[target_col])
+        y_train = train[target_col].to_numpy()
+        x_train = train.drop(columns=[target_col]).to_numpy()
+        forecasts = model.forecast(y=y_train, h=test_size, X=x_train, X_future=x_test)["mean"]
+        for m in metrics:
+            if m.__name__ in ["MASE", "SMAE", "SRMSE", "RMSSE"]:
+                eval_val = m(y_test, forecasts, train[target_col])
+            else:
+                eval_val = m(y_test, forecasts)
+            metrics_dict[m.__name__].append(eval_val)
+    overall_performance = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
+    return pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
 
 def mv_cross_validate(model, df, cv_split, test_size, metrics, step_size=None):
     """
