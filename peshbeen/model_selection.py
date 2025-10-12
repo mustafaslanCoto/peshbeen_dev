@@ -19,6 +19,7 @@ warnings.filterwarnings("ignore")
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from tqdm import tqdm_notebook
 from itertools import product
+from typing import List, Dict, Optional, Callable, Tuple, Any, Union
 
 
 #------------------------------------------------------------------------------
@@ -1640,6 +1641,66 @@ def cross_validate(model, df, cv_split, test_size, metrics, step_size=None):
             metrics_dict[m.__name__].append(eval_val)
     overall_performance = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
     return pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
+
+def var_cross_validate(
+    self,
+    model,
+    df: pd.DataFrame,
+    target_col: str,
+    cv_split: int,
+    test_size: int,
+    step_size: None,
+    metrics: List[Callable]
+) -> pd.DataFrame:
+    """
+    Perform cross-validation for VAR model.
+
+    Parameters
+    ----------
+    model : object
+        VAR model instance with defined target_cols attribute, lag order, and etc.
+    df : pd.DataFrame
+        Input dataframe.
+    target_col : str
+        Target variable for evaluation.
+    cv_split : int
+        Number of cross-validation folds.
+    test_size : int
+        Test size per fold.
+    step_size : int
+        Step size for rolling window. Default is None. Test size is applied
+    metrics : List[Callable]
+        List of metric functions.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with averaged cross-validation metric scores.
+    """
+
+    tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
+    metrics_dict = {m.__name__: [] for m in metrics}
+    # cv_forecasts_df = pd.DataFrame()
+
+    for train_index, test_index in tscv.split(df):
+        train, test = df.iloc[train_index], df.iloc[test_index]
+        x_test, y_test = test.drop(columns=self.target_cols), np.array(test[target_col])
+        model.fit(train)
+        forecasts = model.forecast(test_size, x_test)[target_col]
+
+        forecast_df = test[target_col].to_frame()
+        forecast_df["forecasts"] = forecasts
+        # cv_forecasts_df = pd.concat([cv_forecasts_df, forecast_df], axis=0)
+
+        for m in metrics:
+            if m.__name__ in ["MASE", "SMAE", "SRMSE", "RMSSE"]:
+                eval_val = m(y_test, forecasts, train[target_col])
+            else:
+                eval_val = m(y_test, forecasts)
+            metrics_dict[m.__name__].append(eval_val)
+
+    overall_perform = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
+    return pd.DataFrame(overall_perform, columns=["eval_metric", "score"])
 
 def arima_cross_validate(model, df, target_col, cv_split, test_size, metrics, step_size=None):
     """

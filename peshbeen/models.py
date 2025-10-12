@@ -606,7 +606,7 @@ class VARModel:
             lags = []
             if self.n_lag is not None:
                 for tr, vals in y_lists.items():
-                    if tr in self.lags:
+                    if tr in self.n_lag:
                         lag_used = self.n_lag[tr] if isinstance(self.n_lag[tr], list) else range(1, self.n_lag[tr] + 1)
                         ys = [vals[-x] for x in lag_used]
                         lags += ys
@@ -656,63 +656,6 @@ class VARModel:
                     )
 
         return forecasts
-
-    def cv_var(
-        self,
-        df: pd.DataFrame,
-        target_col: str,
-        cv_split: int,
-        test_size: int,
-        step_size: None,
-        metrics: List[Callable]
-    ) -> pd.DataFrame:
-        """
-        Perform cross-validation for VAR model.
-
-        Parameters
-        ----------
-        df : pd.DataFrame
-            Input dataframe.
-        target_col : str
-            Target variable for evaluation.
-        cv_split : int
-            Number of cross-validation folds.
-        test_size : int
-            Test size per fold.
-        step_size : int
-            Step size for rolling window. Default is None. Test size is applied
-        metrics : List[Callable]
-            List of metric functions.
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame with averaged cross-validation metric scores.
-        """
-        tscv = TimeSeriesSplit(n_splits=cv_split, test_size=test_size)
-        tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
-        self.metrics_dict = {m.__name__: [] for m in metrics}
-        self.cv_forecasts_df = pd.DataFrame()
-
-        for train_index, test_index in tscv.split(df):
-            train, test = df.iloc[train_index], df.iloc[test_index]
-            x_test, y_test = test.drop(columns=self.target_cols), np.array(test[target_col])
-            self.fit(train)
-            bb_forecast = self.forecast(H=test_size, exog=x_test)[target_col]
-
-            forecast_df = test[target_col].to_frame()
-            forecast_df["forecasts"] = bb_forecast
-            self.cv_forecasts_df = pd.concat([self.cv_forecasts_df, forecast_df], axis=0)
-
-            for m in metrics:
-                if m.__name__ == 'MASE':
-                    eval_score = m(y_test, bb_forecast, train[target_col])
-                else:
-                    eval_score = m(y_test, bb_forecast)
-                self.metrics_dict[m.__name__].append(eval_score)
-
-        overall_perform = [[m.__name__, np.mean(self.metrics_dict[m.__name__])] for m in metrics]
-        return pd.DataFrame(overall_perform, columns=["eval_metric", "score"])
     
 
 class ml_bidirect_forecaster:
