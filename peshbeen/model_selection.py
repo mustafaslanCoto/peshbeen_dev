@@ -1643,7 +1643,6 @@ def cross_validate(model, df, cv_split, test_size, metrics, step_size=None):
     return pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
 
 def var_cross_validate(
-    self,
     model,
     df: pd.DataFrame,
     target_col: str,
@@ -1684,7 +1683,7 @@ def var_cross_validate(
 
     for train_index, test_index in tscv.split(df):
         train, test = df.iloc[train_index], df.iloc[test_index]
-        x_test, y_test = test.drop(columns=self.target_cols), np.array(test[target_col])
+        x_test, y_test = test.drop(columns=model.target_cols), np.array(test[target_col])
         model.fit(train)
         forecasts = model.forecast(test_size, x_test)[target_col]
 
