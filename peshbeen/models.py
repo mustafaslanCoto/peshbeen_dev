@@ -55,13 +55,14 @@ class ml_forecaster:
         trend (bool, optional): Whether to remove trend.
         ets_params (tuple, optional): A tuple (model_params, fit_params) for exponential smoothing. Ex.g. ({'trend': 'add', 'seasonal': 'add'}, {'damped_trend': True}).
         change_points (list, optional): List of change points for piecewise regression if trend is passed as : "linear".
+        pol_degree (int, optional): Degree of polynomial trend if trend is "linear". Default is 1.
         box_cox (bool, optional): Whether to perform a Box–Cox transformation.
         box_cox_lmda (float, optional): The lambda value for Box–Cox.
         box_cox_biasadj (bool, optional): If True, adjust bias after Box–Cox inversion. Default is False.
         lag_transform (list, optional): List specifying additional lag transformations.
     """
     def __init__(self, model, target_col, cat_variables=None, target_encode=False, lags=None, difference=None, seasonal_diff=None,
-                 trend=None, ets_params=None, change_points=None, box_cox=False, box_cox_lmda=None,
+                 trend=None, ets_params=None, change_points=None, pol_degree=1, box_cox=False, box_cox_lmda=None,
                  box_cox_biasadj=False, lag_transform=None):
 
         self.target_col = target_col
@@ -87,6 +88,7 @@ class ml_forecaster:
             self.ets_model = None
             self.ets_fit = None
         self.cps = change_points
+        self.pol = pol_degree
         self.box_cox = box_cox
         self.lamda = box_cox_lmda
         self.biasadj = box_cox_biasadj
@@ -151,9 +153,9 @@ class ml_forecaster:
                 if self.trend in ["linear", "feature_lr"]:
                     # self.lr_model = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), dfc[self.target_col])
                     if self.cps is not None:
-                        trend, self.lr_model = lr_trend_model(dfc[self.target_col], breakpoints=self.cps, type='piecewise')
+                        trend, self.lr_model = lr_trend_model(dfc[self.target_col], degree=self.pol, breakpoints=self.cps, type='piecewise')
                     else:
-                        trend, self.lr_model = lr_trend_model(dfc[self.target_col])
+                        trend, self.lr_model = lr_trend_model(dfc[self.target_col], degree=self.pol)
                     if self.trend == "linear":
                         dfc[self.target_col] = dfc[self.target_col] - trend
                 if self.trend in ["ets", "feature_ets"]:
@@ -256,7 +258,7 @@ class ml_forecaster:
             if self.trend in ["feature_lr", "linear"]:
                 # future_time = np.arange(self.len, self.len + H).reshape(-1, 1)
                 # trend_forecast = np.array(self.lr_model.predict(future_time)) # Predicting trend
-                trend_forecast= forecast_trend(model = self.lr_model, H=H, start=self.len, breakpoints=self.cps)
+                trend_forecast= forecast_trend(model = self.lr_model, H=H, start=self.len, degree=self.pol, breakpoints=self.cps)
             else:  # ets or feature_ets
                 trend_forecast = np.array(self.ets_model_fit.forecast(H))
 
@@ -337,6 +339,8 @@ class VARModel:
         Dictionary specifying seasonal differencing for each variable. For example, {'target1': 12, 'target2': 7}.
     trend : Optional[Dict[str, bool]] (default=None)
         Dictionary specifying trend type for each variable: "linear", "ses", "feature_lr", or "feature_ses".
+    pol_degree : Optional[Dict[str, int]] (default=1)
+        Dictionary specifying the degree of the polynomial trend for each variable when type is "linear". Default is 1 for all variables.
     ets_params : Optional[Dict[str, tuple]] (default=None)
         Dictionary specifying params for ExponentialSmoothing per variable.
         For example, {'target1': ({'trend': 'add', 'seasonal': 'add'}, {'damped_trend': True}), 'target2': ({'trend': 'add', 'seasonal': 'add'}, {'damped_trend': True})}.
@@ -381,6 +385,7 @@ class VARModel:
         difference: Optional[Dict[str, int]] = None,
         seasonal_diff: Optional[Dict[str, int]] = None,
         trend: Optional[Dict[str, bool]] = None,
+        pol_degree: Optional[Dict[str, int]] = 1,
         ets_params: Optional[Dict[str, tuple]] = None,
         change_points: Optional[Dict[str, List[int]]] = None,
         box_cox: Optional[Dict[str, bool]] = None,
@@ -412,6 +417,12 @@ class VARModel:
         
         # Handle trend default types
         self.trend = trend
+        if isinstance(pol_degree, int):
+            self.pol = {col: pol_degree for col in self.target_col}
+        elif isinstance(pol_degree, dict):
+            self.pol = {col: pol_degree[col] if col in pol_degree else 1 for col in self.target_col}
+        else:
+            raise ValueError("pol_degree must be an integer or a dictionary mapping target columns to integer degrees.")
         if self.trend is not None:
             if not isinstance(self.trend, dict):
                 raise TypeError("trend must be a dictionary of target values")
@@ -461,9 +472,9 @@ class VARModel:
                             # self.lr_model = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), dfc[self.target_col])
                         if self.cps is not None:
                             if k in self.cps and self.cps[k]:
-                                trend, model_fit = lr_trend_model(self.orig_targets[k], breakpoints=self.cps[k], type='piecewise')
+                                trend, model_fit = lr_trend_model(self.orig_targets[k], degree=self.pol[k], breakpoints=self.cps[k], type='piecewise')
                         else:
-                            trend, model_fit = lr_trend_model(self.orig_targets[k])
+                            trend, model_fit = lr_trend_model(self.orig_targets[k], degree=self.pol[k])
 
                         dfc[k] = dfc[k] - trend
                         self.trend_models[k] = model_fit
@@ -587,9 +598,9 @@ class VARModel:
             for ff in self.trend:
                 if self.trend.get(ff) == "linear":
                     if ff in self.cps and self.cps[ff]:
-                        trend_forecast= forecast_trend(model = self.trend_models[ff], H=H, start=self.len, breakpoints=self.cps[ff])
+                        trend_forecast= forecast_trend(model = self.trend_models[ff], H=H, start=self.len, degree=self.pol[ff], breakpoints=self.cps[ff])
                     else:
-                        trend_forecast= forecast_trend(model = self.trend_models[ff], H=H, start=self.len)  
+                        trend_forecast= forecast_trend(model = self.trend_models[ff], H=H, start=self.len, degree=self.pol[ff])  
                 elif self.trend.get(ff) == "ets":
                     trend_forecast = np.array(self.trend_models[ff].forecast(H))
 
@@ -1064,6 +1075,7 @@ class MsHmmRegression:
         add_constant (bool): Whether to add constant to regressors.
         difference (int or None): Order of differencing to apply to target.
         trend (str or None): Type of trend to remove ('linear', 'ets', etc.). Default is None.
+        pol_degree (int): Degree of polynomial for trend if trend is 'linear'. Default is 1.
         cat_variables (list or None): List of categorical columns.
         n_iter (int): Maximum number of EM iterations.
         tol (float): Convergence tolerance for EM.
@@ -1078,7 +1090,7 @@ class MsHmmRegression:
 
     def __init__(self, n_components, target_col, lags, method="posterior",
                  startprob_prior=1e3, transmat_prior=1e5, add_constant=True,
-                 difference=None, trend=None, ets_params = None, change_points=None,
+                 difference=None, trend=None, pol_degree=1, ets_params = None, change_points=None,
                  cat_variables=None, lag_transform=None, n_iter=100, tol=1e-6,
                  coefficients=None, stds=None, init_state=None, trans_matrix=None,
                  box_cox=False, lamda=None, box_cox_biasadj=False, season_diff=None, 
@@ -1098,6 +1110,7 @@ class MsHmmRegression:
         self.lamda = lamda
         self.biasadj = box_cox_biasadj
         self.trend = trend
+        self.pol = pol_degree
         if ets_params is not None:
             self.ets_model = ets_params[0]
             self.ets_fit = ets_params[1]
@@ -1174,9 +1187,9 @@ class MsHmmRegression:
                     # self.lr_model = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), self.target_orig)
                     # dfc[self.target_col] = dfc[self.target_col] - self.lr_model.predict(np.arange(self.len).reshape(-1, 1))
                     if self.cps is not None:
-                        trend, self.lr_model = lr_trend_model(self.target_orig, breakpoints=self.cps, type='piecewise')
+                        trend, self.lr_model = lr_trend_model(self.target_orig, degree=self.pol, breakpoints=self.cps, type='piecewise')
                     else:
-                        trend, self.lr_model = lr_trend_model(self.target_orig)
+                        trend, self.lr_model = lr_trend_model(self.target_orig, degree=self.pol)
                     dfc[self.target_col] = dfc[self.target_col] - trend
                 if self.trend == "ets":
                     self.ets_model_fit = ExponentialSmoothing(self.target_orig, **self.ets_model).fit(**self.ets_fit)
@@ -1489,7 +1502,7 @@ class MsHmmRegression:
             if self.trend == "linear":
                 # future_time = np.arange(len(self.target_orig), len(self.target_orig) + H).reshape(-1, 1)
                 # trend_forecast = np.array(self.lr_model.predict(future_time))
-                trend_forecast= forecast_trend(model = self.lr_model, H=H, start=self.len, breakpoints=self.cps)
+                trend_forecast= forecast_trend(model = self.lr_model, H=H, start=self.len, degree=self.pol, breakpoints=self.cps)
             elif self.trend == "ets":
                 trend_forecast = np.array(self.ets_model_fit.forecast(H))
 
@@ -1571,6 +1584,7 @@ class MsHmmVar:
         seasonal_diff (dict): Dict mapping target column to seasonal difference order.
         lag_transform (dict): Dict mapping target column to lag transformation order.
         trend (dict): Dict mapping target column to trend removal method.
+        pol_degree (int): Polynomial degree if trend is 'linear'. Default is 1 for all target columns.
         ets_params : Optional[Dict[str, tuple]] (default=None)
         Dictionary specifying params for ExponentialSmoothing per variable.
         For example, {'target1': ({'trend': 'add', 'seasonal': 'add'}, {'damped_trend': True}), 'target2': ({'trend': 'add', 'seasonal': 'add'}, {'damped_trend': True})}.
@@ -1591,7 +1605,7 @@ class MsHmmVar:
     """
     def __init__(self, n_components, target_col, lags, difference=None, method="posterior", covariance_type="full",
                  startprob_prior=1e3, transmat_prior=1e5, add_constant=True, cat_variables=None, lag_transform=None, seasonal_diff=None, trend=None,
-                 ets_params = None, change_points=None,
+                 pol_degree=1, ets_params = None, change_points=None,
                  n_iter=100, tol=1e-6, coefficients=None, init_state=None, trans_matrix=None, box_cox=None, lamda=None, box_cox_biasadj=False,
                  random_state=None, switching_cov=True, verbose=False):
 
@@ -1631,6 +1645,12 @@ class MsHmmVar:
 
         # Handle trend default types
         self.trend = trend
+        if isinstance(pol_degree, int):
+            self.pol = {col: pol_degree for col in self.target_col}
+        elif isinstance(pol_degree, dict):
+            self.pol = {col: pol_degree[col] if col in pol_degree else 1 for col in self.target_col}
+        else:
+            raise ValueError("pol_degree must be an integer or a dictionary mapping target columns to integer degrees.")
         if self.trend is not None:
             if not isinstance(self.trend, dict):
                 raise TypeError("trend must be a dictionary of target values")
@@ -1691,9 +1711,9 @@ class MsHmmVar:
                             # self.lr_model = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), dfc[self.target_col])
                         if self.cps is not None:
                             if k in self.cps and self.cps[k]:
-                                trend, model_fit = lr_trend_model(self.orig_targets[k], breakpoints=self.cps[k], type='piecewise')
+                                trend, model_fit = lr_trend_model(self.orig_targets[k], degree=self.pol[k], breakpoints=self.cps[k], type='piecewise')
                         else:
-                            trend, model_fit = lr_trend_model(self.orig_targets[k])
+                            trend, model_fit = lr_trend_model(self.orig_targets[k], degree=self.pol[k])
 
                         dfc[k] = dfc[k] - trend
                         self.trend_models[k] = model_fit
@@ -2057,9 +2077,9 @@ class MsHmmVar:
             for col in self.trend:
                 if self.trend[col] == "linear":
                     if col in self.cps and self.cps[col]:
-                        trend_forecasts[col]= forecast_trend(model = self.trend_models[col], H=H, start=self.len, breakpoints=self.cps[col])
+                        trend_forecasts[col]= forecast_trend(model = self.trend_models[col], H=H, start=self.len, degree=self.pol[col], breakpoints=self.cps[col])
                     else:
-                        trend_forecasts[col]= forecast_trend(model = self.trend_models[col], H=H, start=self.len)
+                        trend_forecasts[col]= forecast_trend(model = self.trend_models[col], H=H, start=self.len, degree=self.pol[col])
                 elif self.trend[col] == "ets":
                     trend_forecasts[col] = np.array(self.trend_models[col].forecast(H))
 

@@ -214,13 +214,14 @@ def ccf_strength(x, y, alpha=0.05, n_lags=5, adjusted=True):
 
     return exceed_score
 
-def lr_trend_model(series, breakpoints=None, type='linear'):
+def lr_trend_model(series, breakpoints=None, type='linear', degree=1):
     """
     Compute the piecewise trend of a time series using linear regression.
     Args:
         series (pd.Series): The input time series.
         breakpoints (list): A list of breakpoints for the piecewise segments when type is "piecewise". It could be a list of indices.
         type (str): The type of model ("linear" or "piecewise")
+        degree (int): The degree of the polynomial trend when type is "linear". Default is 1 (linear trend).
 
     Returns:
         pd.Series: The piecewise trend of the time series, with length of each trend index to be used for forecasting and the fitted model
@@ -240,12 +241,18 @@ def lr_trend_model(series, breakpoints=None, type='linear'):
         model_lr = LinearRegression().fit(X_trend, np.array(series))
         trend = model_lr.predict(X_trend)
     else:
-        X_trend = T.reshape(-1, 1)
+        if degree == 1:
+            X_trend = T.reshape(-1, 1)
+        elif degree > 1:
+            X_trend = np.column_stack([T**i for i in range(1, degree+1)])
+        else:
+            raise ValueError("Degree must be a positive integer.")
         model_lr = LinearRegression().fit(X_trend, np.array(series))
         trend = model_lr.predict(X_trend)
     return trend, model_lr
 
-def forecast_trend(model, H, start, breakpoints=None):
+
+def forecast_trend(model, H, start, degree = 1, breakpoints=None):
     """
     Forecast future trend values using the fitted model.
     Args:
@@ -253,11 +260,18 @@ def forecast_trend(model, H, start, breakpoints=None):
         breakpoints (list): A list of breakpoints for the piecewise segments.
         H (int): The forecast horizon.
         start (int): The starting point for the forecast.
+        degree (int): The degree of the polynomial trend when type is "linear". Default is 1 (linear trend).
 
     Returns:
         np.ndarray: The forecasted trend values.
     """
-    T_future = np.arange(start, start + H, dtype=int).reshape(-1, 1)
+    TH = np.arange(start, start + H, dtype=int)
+    if degree == 1:
+        T_future = TH.reshape(-1, 1)
+    elif degree > 1:
+        T_future = np.column_stack([TH**i for i in range(1, degree+1)])
+    else:
+        raise ValueError("Degree must be a positive integer.")
 
     # Build future design matrix
     X_future = T_future
