@@ -55,7 +55,7 @@ class ml_forecaster:
         trend (bool, optional): Whether to remove trend.
         ets_params (tuple, optional): A tuple (model_params, fit_params) for exponential smoothing. Ex.g. ({'trend': 'add', 'seasonal': 'add'}, {'damped_trend': True}).
         change_points (list, optional): List of change points for piecewise regression if trend is passed as : "linear".
-        pol_degree (int, optional): Degree of polynomial trend if trend is "linear". Default is 1.
+        pol_degree (int, optional): Degree of polynomial trend if trend is "linear". Integer or list of integers. Default is 1.
         box_cox (bool, optional): Whether to perform a Box–Cox transformation.
         box_cox_lmda (float, optional): The lambda value for Box–Cox.
         box_cox_biasadj (bool, optional): If True, adjust bias after Box–Cox inversion. Default is False.
@@ -339,7 +339,7 @@ class VARModel:
         Dictionary specifying seasonal differencing for each variable. For example, {'target1': 12, 'target2': 7}.
     trend : Optional[Dict[str, bool]] (default=None)
         Dictionary specifying trend type for each variable: "linear", "ses", "feature_lr", or "feature_ses".
-    pol_degree : Optional[Dict[str, int]] (default=1)
+    pol_degree : Optional[Dict[str, Union[int, List[int]]] (default=1)
         Dictionary specifying the degree of the polynomial trend for each variable when type is "linear". Default is 1 for all variables.
     ets_params : Optional[Dict[str, tuple]] (default=None)
         Dictionary specifying params for ExponentialSmoothing per variable.
@@ -1075,7 +1075,7 @@ class MsHmmRegression:
         add_constant (bool): Whether to add constant to regressors.
         difference (int or None): Order of differencing to apply to target.
         trend (str or None): Type of trend to remove ('linear', 'ets', etc.). Default is None.
-        pol_degree (int): Degree of polynomial for trend if trend is 'linear'. Default is 1.
+        pol_degree (int): Degree of polynomial for trend if trend is 'linear'. Integer or list of integers. Default is 1.
         cat_variables (list or None): List of categorical columns.
         n_iter (int): Maximum number of EM iterations.
         tol (float): Convergence tolerance for EM.
@@ -1584,7 +1584,7 @@ class MsHmmVar:
         seasonal_diff (dict): Dict mapping target column to seasonal difference order.
         lag_transform (dict): Dict mapping target column to lag transformation order.
         trend (dict): Dict mapping target column to trend removal method.
-        pol_degree (int): Polynomial degree if trend is 'linear'. Default is 1 for all target columns.
+        pol_degree (int): Polynomial degree if trend is 'linear'. Default is 1 for all target columns. For example, {target1: 1, target2: [1,4]}.
         ets_params : Optional[Dict[str, tuple]] (default=None)
         Dictionary specifying params for ExponentialSmoothing per variable.
         For example, {'target1': ({'trend': 'add', 'seasonal': 'add'}, {'damped_trend': True}), 'target2': ({'trend': 'add', 'seasonal': 'add'}, {'damped_trend': True})}.

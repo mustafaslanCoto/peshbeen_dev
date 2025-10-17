@@ -243,8 +243,10 @@ def lr_trend_model(series, breakpoints=None, type='linear', degree=1):
     else:
         if degree == 1:
             X_trend = T.reshape(-1, 1)
-        elif degree > 1:
+        elif (degree > 1) and isinstance(degree, int):
             X_trend = np.column_stack([T**i for i in range(1, degree+1)])
+        elif isinstance(degree, list):
+            X_trend = np.column_stack([T**i for i in degree])
         else:
             raise ValueError("Degree must be a positive integer.")
         model_lr = LinearRegression().fit(X_trend, np.array(series))
@@ -268,8 +270,10 @@ def forecast_trend(model, H, start, degree = 1, breakpoints=None):
     TH = np.arange(start, start + H, dtype=int)
     if degree == 1:
         T_future = TH.reshape(-1, 1)
-    elif degree > 1:
+    elif (degree > 1) and isinstance(degree, int):
         T_future = np.column_stack([TH**i for i in range(1, degree+1)])
+    elif isinstance(degree, list):
+        T_future = np.column_stack([TH**i for i in degree])
     else:
         raise ValueError("Degree must be a positive integer.")
 
