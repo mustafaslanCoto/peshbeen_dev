@@ -320,6 +320,11 @@ def mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model
     
     # lags = list(range(1, max_lags+1))
 
+    if lags_to_consider is None:
+        lags_to_consider = {}
+    if transformations is None:
+        transformations = {}
+
     best_features = {"best_lags": {i: [] for i in lags_to_consider if lags_to_consider is not None}, "best_transforms": {i: [] for i in transformations if transformations is not None}, "best_exogs": []}
     remaining_lags = {i:list(range(1, j+1)) for i, j in lags_to_consider.items()}
 
@@ -358,13 +363,16 @@ def mv_forward_feature_selection(df, target_col, n_folds = None, H = None, model
             return score < best_s
 
     def validation(model_test, df_test):
-        cv_result = mv_cross_validate(model=model_test, df=df_test, cv_split=n_folds,
-                                            test_size=H, metrics=metrics, step_size=step_size)
+        # cv_result = mv_cross_validate(model=model_test, df=df_test, cv_split=n_folds,
+        #                                     test_size=H, metrics=metrics, step_size=step_size)
+        cv_result = var_cross_validate(model=model_test, df= df_test,
+                                       target_col=target_col, step_size=step_size, cv_split=n_folds,
+                                       test_size=H, metrics=metrics)
     
         if isinstance(metrics, list):
-            return cv_result[target_col].tolist()
+            return cv_result["score"].tolist()
         else:
-            return cv_result[target_col].values[0]
+            return cv_result["score"].values[0]
 
     # while max_lag>0:
     while True:
@@ -963,6 +971,10 @@ def hmm_mv_forward_feature_selection(df, target_col, n_folds = None, H = None, m
     # max_lag = sum(x for x in max_lags.values())
     
     # lags = list(range(1, max_lags+1))
+    if lags_to_consider is None:
+        lags_to_consider = {}
+    if transformations is None:
+        transformations = {}
 
     best_features = {"best_lags": {i: [] for i in lags_to_consider if lags_to_consider is not None}, "best_transforms": {i: [] for i in transformations if transformations is not None}, "best_exogs": []}
     remaining_lags = {i:list(range(1, j+1)) for i, j in lags_to_consider.items()}
@@ -1463,6 +1475,106 @@ def tune_ets(data, param_space, cv_splits, horizon, eval_metric, eval_num, step_
                   if not (k == "damping_trend" and model_params.get("damped_trend") is False)}
     return model_params, fit_params
 
+def cv_hmm_lag_tune(
+    model,
+    df,
+    cv_split,
+    test_size,
+    eval_metric,
+    lag_space=None,
+    step_size=None,
+    opt_horizon=None,
+    eval_num=100,
+    verbose=False,
+):
+    """
+    Tune forecasting model hyperparameters using cross-validation and Bayesian optimization.
+
+    Parameters
+    ----------
+    model : object
+        Forecasting model object with .fit and .forecast methods and relevant attributes.
+    df : pd.DataFrame
+        Time series dataframe.
+    cv_split : int
+        Number of time series splits.
+    test_size : int
+        Size of test window for each split.
+    lag_space : dict
+        Hyperopt lag search space.
+    eval_metric : callable
+        Evaluation metric function.
+    step_size : int, optional
+        Step size for moving the window. Defaults to None (equal to test_size).
+    opt_horizon : int, optional
+        Evaluate only on last N points of each split. Defaults to None (all points).
+    eval_num : int, optional
+        Number of hyperopt evaluations. Defaults to 100.
+    verbose : bool, optional
+        Print progress. Defaults to False.
+
+    Returns
+    -------
+    dict
+        Best hyperparameter values found.
+    """
+    tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
+    
+    max_lag = lag_space 
+    space = {f"lag_{i}": hp.choice(f"lag_{i}", [0, 1]) for i in range(1, max_lag + 1)}
+    def objective(params):
+
+        selected_lags = [i for i in range(1, max_lag + 1) if params[f"lag_{i}"] == 1]
+        model_ = model.copy()
+        model_.lags = selected_lags
+
+                # Optional: penalize too few lags
+        if len(selected_lags) < 1:
+            return {"loss": 1e6, "status": STATUS_OK}
+
+        metrics = []
+        for idx, (train_index, test_index) in enumerate(tscv.split(df)):
+            train, test = df.iloc[train_index], df.iloc[test_index]
+            x_test = test.drop(columns=[model.target_col])
+            y_test = np.array(test[model.target_col])
+            if idx == 0:
+                model_.fit_em(train)
+            else:
+                model_.fit(train)
+            
+            y_pred = model_.forecast(len(y_test), x_test)
+
+            #Evaluate using the specified metric
+            if eval_metric.__name__ in ["MASE", "SMAE", "SRMSE", "RMSSE"]:
+                score = eval_metric(y_test[-opt_horizon:] if opt_horizon else y_test,
+                                    y_pred[-opt_horizon:] if opt_horizon else y_pred,
+                                    train[model.target_col])
+            else:
+                score = eval_metric(
+                        y_test[-opt_horizon:] if opt_horizon else y_test,
+                        y_pred[-opt_horizon:] if opt_horizon else y_pred,
+                    )
+            metrics.append(score)
+
+        mean_score = np.mean(metrics)
+        if verbose:
+            print("Score:", mean_score)
+        return {"loss": mean_score, "status": STATUS_OK}
+
+    trials = Trials()
+    best_hyperparams = fmin(
+        fn=objective,
+        space=space,
+        algo=tpe.suggest,
+        max_evals=eval_num,
+        trials=trials,
+    )
+
+    # Extract and sort lag values
+    best_lag_indexes = [value for key, value in sorted(((k, v) for k, v in best_hyperparams.items() if k.startswith("lag_")),
+                                                          key=lambda x: int(x[0].split("_")[1]))]
+    best_lag_values = [i for i in range(1, lag_space + 1) if best_lag_indexes[i-1]==1]
+    return best_lag_values
 
 #------------------------------------------------------------------------------
 # SARIMA Model Tuning
@@ -2044,22 +2156,20 @@ def mv_cv_tune(
 
     return space_eval(param_space, best_hyperparams), best_lags, best_transforms
 
-def hmm_feature_tune(
+def cv_lag_tune(
     model,
     df,
     cv_split,
     test_size,
     eval_metric,
     lag_space=None,
-    starting_lags=None,
-    transform_space=None,
     step_size=None,
     opt_horizon=None,
     eval_num=100,
     verbose=False,
 ):
     """
-    Tune forecasting model possible lags and transformations using cross-validation and Bayesian optimization.
+    Tune forecasting model hyperparameters using cross-validation and Bayesian optimization.
 
     Parameters
     ----------
@@ -2071,12 +2181,8 @@ def hmm_feature_tune(
         Number of time series splits.
     test_size : int
         Size of test window for each split.
-    lag_space : int, optional
-        Maximum number of lags to consider for each variable. Defaults to None (no lag).
-    starting_lags : list, optional
-        List of starting lags for each variable. Defaults to None (no starting lags).
-    transform_space : int, optional
-        Possible transformations to consider for each variable. Defaults to None (no transformation).
+    lag_space : dict
+        Hyperopt lag search space.
     eval_metric : callable
         Evaluation metric function.
     step_size : int, optional
@@ -2094,34 +2200,13 @@ def hmm_feature_tune(
         Best hyperparameter values found.
     """
     tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
-
-    
-    if lag_space is not None:
-        lags_to_consider = list(range(1, lag_space + 1))
-        if starting_lags is not None:
-            # if list of starting_lags is provided, ensure they are not in lags_to_consider
-            lags_to_consider = [lag for lag in lags_to_consider if lag not in starting_lags]
-
-        lag_postions = {f"lag_{i}": hp.choice(f"lag_{i}", [0, 1]) for i in lags_to_consider}
-        search_space = {**lag_postions}
-
-    if transform_space is not None:
-        transform_positions = {t.get_name(): hp.choice(t.get_name(), [0, 1]) for t in transform_space}
-        search_space = {**transform_positions, **search_space}
-
+    max_lag = lag_space
+    space = {f"lag_{i}": hp.choice(f"lag_{i}", [0, 1]) for i in range(1, max_lag + 1)}
     def objective(params):
 
-        if lag_space is not None:
-            if starting_lags is not None:
-                selected_lags = starting_lags + [i for i in lags_to_consider if params[f"lag_{i}"] == 1]
-            else:
-                selected_lags = [i for i in lags_to_consider if params[f"lag_{i}"] == 1]
-            model_ = model.copy()
-            model_.lags = sorted(selected_lags)
-
-        if transform_space is not None:
-            selected_transforms = [t for t in transform_space if params[t.get_name()] == 1]
-            model_.lag_transform = selected_transforms
+        selected_lags = [i for i in range(1, max_lag + 1) if params[f"lag_{i}"] == 1]
+        model_ = model.copy()
+        model_.n_lag = selected_lags
 
                 # Optional: penalize too few lags
         if len(selected_lags) < 1:
@@ -2132,10 +2217,8 @@ def hmm_feature_tune(
             train, test = df.iloc[train_index], df.iloc[test_index]
             x_test = test.drop(columns=[model.target_col])
             y_test = np.array(test[model.target_col])
-            model_.data_prep(train) # update data preparation because if new lags to be consistent with coefficients
-            model_.compute_coeffs() # update model coefficients because of new lags
-            model_.fit_em(train)
-            
+            model_.fit(train)
+
             y_pred = model_.forecast(len(y_test), x_test)
 
             #Evaluate using the specified metric
@@ -2158,30 +2241,17 @@ def hmm_feature_tune(
     trials = Trials()
     best_hyperparams = fmin(
         fn=objective,
-        space=search_space,
+        space=space,
         algo=tpe.suggest,
         max_evals=eval_num,
         trials=trials,
     )
 
-    model.tuned_params = [
-        space_eval(search_space, {k: v[0] for k, v in t["misc"]["vals"].items()})
-        for t in trials.trials
-    ]
-
     # Extract and sort lag values
-    best_lag_values = []
-    best_transforms = []
-    if lag_space is not None:
-        best_lag_values = sorted(int(k.split("_")[1]) for k, v in best_hyperparams.items() if k.startswith("lag_") and v == 1)
-        if starting_lags is not None:
-            best_lag_values = sorted(list(set(best_lag_values).union(set(starting_lags))))
-            
-    if transform_space is not None:
-        best_transform_orig = [v for v in best_hyperparams.values() if v in transform_space]
-        # get the name of transforms
-        best_transforms = [t.get_name() for t in best_transform_orig]
-    return best_lag_values, best_transforms
+    best_lag_indexes = [value for key, value in sorted(((k, v) for k, v in best_hyperparams.items() if k.startswith("lag_")),
+                                                          key=lambda x: int(x[0].split("_")[1]))]
+    best_lag_values = [i for i in range(1, lag_space + 1) if best_lag_indexes[i-1]==1]
+    return best_lag_values
 
 #------------------------------------------------------------------------------
 # HMM CV utility function

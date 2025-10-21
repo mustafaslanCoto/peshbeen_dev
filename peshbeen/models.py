@@ -418,9 +418,9 @@ class VARModel:
         # Handle trend default types
         self.trend = trend
         if isinstance(pol_degree, int):
-            self.pol = {col: pol_degree for col in self.target_col}
+            self.pol = {col: pol_degree for col in self.target_cols}
         elif isinstance(pol_degree, dict):
-            self.pol = {col: pol_degree[col] if col in pol_degree else 1 for col in self.target_col}
+            self.pol = {col: pol_degree[col] if col in pol_degree else 1 for col in self.target_cols}
         else:
             raise ValueError("pol_degree must be an integer or a dictionary mapping target columns to integer degrees.")
         if self.trend is not None:
@@ -597,7 +597,7 @@ class VARModel:
             trend_forecasts = {}
             for ff in self.trend:
                 if self.trend.get(ff) == "linear":
-                    if ff in self.cps and self.cps[ff]:
+                    if (self.cps is not None) and (ff in self.cps) and (self.cps[ff] is not None):
                         trend_forecast= forecast_trend(model = self.trend_models[ff], H=H, start=self.len, degree=self.pol[ff], breakpoints=self.cps[ff])
                     else:
                         trend_forecast= forecast_trend(model = self.trend_models[ff], H=H, start=self.len, degree=self.pol[ff])  
@@ -634,7 +634,7 @@ class VARModel:
             pred = self.predict(inp)
             # Add back trend
             
-            for id_, ff in enumerate(self.forecasts.keys()):
+            for id_, ff in enumerate(forecasts.keys()):
                 forecasts[ff].append(pred[id_])
                 y_lists[ff].append(pred[id_])
         
@@ -2076,7 +2076,7 @@ class MsHmmVar:
             trend_forecasts = {}
             for col in self.trend:
                 if self.trend[col] == "linear":
-                    if col in self.cps and self.cps[col]:
+                    if (self.cps is not None) and (col in self.cps):
                         trend_forecasts[col]= forecast_trend(model = self.trend_models[col], H=H, start=self.len, degree=self.pol[col], breakpoints=self.cps[col])
                     else:
                         trend_forecasts[col]= forecast_trend(model = self.trend_models[col], H=H, start=self.len, degree=self.pol[col])
