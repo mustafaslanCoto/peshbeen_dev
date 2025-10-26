@@ -1567,6 +1567,27 @@ class MsHmmRegression:
                 )
 
         return forecasts
+    
+    def stats(self):
+        """
+        Return a summary of the fitted HMM regression model.
+        """
+        # Weighted R2 calculation for each regime
+        y_weighted = self.y * self.posterior
+        y_wmean = y_weighted.mean(axis=1)
+        self.regime_fitted = (self.coeffs[:, None, :] * (self.posterior[:, :, None]*self.X)).sum(axis=2)
+
+        # Calculate TSS, RSS, and R2 for each regime
+        tss_w = ((y_weighted-y_wmean[:, None])**2).sum(axis=1)
+        rss_w = ((y_weighted - self.regime_fitted)**2).sum(axis=1)
+        self.regime_r2 = 1-rss_w/tss_w
+
+        # Overall R2 calculation
+        self.fitted = self.regime_fitted.sum(axis=0)
+        y_mean = np.mean(self.y)
+        rss = np.sum((self.y - self.fitted) ** 2)
+        tss = np.sum((self.y - y_mean) ** 2)
+        self.r2 = 1 - (rss / tss)
 # Hidden Markov Model with Vector Autoregressive (VAR)
 
 class MsHmmVar:
