@@ -1620,9 +1620,15 @@ class MsHmmRegression:
             arr = np.concatenate((arr, stats_b), axis=1)
         self.param_spec_df = pd.DataFrame(arr, index=self.col_names).reset_index().rename(columns={"index": "variable"})
 
-    def summary(self):
+    def summary(self, table_font_size="12px", data_row_padding="4px", column_labels_padding="4px"):
         """
         Print a summary of the fitted HMM regression model.
+        Args:
+            table_font_size (str): Font size for the summary table.
+            data_row_padding (str): Padding for data rows in the summary table.
+            column_labels_padding (str): Padding for column labels in the summary table.
+        Returns:
+            gt.Table: A gt table object containing the model summary.
         """
         # self.stats()
         self.get_param_spec()
@@ -1674,7 +1680,11 @@ class MsHmmRegression:
                 [("Data", data_df, False)],                 # title only → one line        
                 [("Diagnostics", diagnosis_df, False)],
             ],
-            subtitle_text="Regime-switching hidden markov regression model results")
+            subtitle_text="Regime-switching hidden markov regression model results").tab_options(
+        table_font_size=table_font_size,          # shrink all text
+        data_row_padding=data_row_padding,          # tighten row height
+        column_labels_padding=column_labels_padding  # tighten header band
+        )
         return gt_final
 
 
