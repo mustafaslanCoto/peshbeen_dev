@@ -16,7 +16,7 @@ setup(
         url='https://github.com/mustafaslanCoto/peshbeen',
         install_requires=["xgboost", "lightgbm", "catboost", "pandas",
                           "numpy", "scikit-learn", "datetime", "hyperopt","statsmodels", "seaborn", "statsforecast",
-                          "matplotlib", "window_ops", "cubist", "scipy", "numba"], # add any additional packages that 
+                          "matplotlib", "window_ops", "cubist", "scipy", "numba", "great_tables"], # add any additional packages that 
         # needs to be installed along with your package. Eg: 'caer'
         
         keywords=['python', 'peshbeen', 'forecasting', 'time series', 'machine learning'],

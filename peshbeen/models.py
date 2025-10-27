@@ -27,6 +27,7 @@ from peshbeen.transformations import (box_cox_transform, back_box_cox_transform,
                         expanding_mean, expanding_std, expanding_quantile)
 from peshbeen.model_selection import ParametricTimeSeriesSplit
 from peshbeen.stattools import lr_trend_model, forecast_trend
+from peshbeen.formatting import make_main_gt, gt_mini, inject_header_table_groups
 from catboost import CatBoostRegressor
 from cubist import Cubist
 # dot not show warnings
@@ -38,6 +39,7 @@ from scipy.stats import norm, multivariate_normal
 from sklearn.linear_model import LinearRegression
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from scipy.special import logsumexp
+from scipy.stats import t
 
 
 class ml_forecaster:
@@ -1567,11 +1569,13 @@ class MsHmmRegression:
                 )
 
         return forecasts
-    
-    def stats(self):
+
+
+    def get_param_spec(self):
         """
-        Return a summary of the fitted HMM regression model.
+        Get the model parameters: coefficients, stds, initial state distribution, transition matrix.
         """
+
         # Weighted R2 calculation for each regime
         y_weighted = self.y * self.posterior
         y_wmean = y_weighted.mean(axis=1)
@@ -1588,6 +1592,89 @@ class MsHmmRegression:
         rss = np.sum((self.y - self.fitted) ** 2)
         tss = np.sum((self.y - y_mean) ** 2)
         self.r2 = 1 - (rss / tss)
+
+        # coefs = self.coeffs # shape (s, p)
+        T = len(self.y)
+        # n_states = self.n_components
+        p = self.coeffs.shape[1]
+
+        arr = np.empty((p, 0)) 
+        fit_ = 0
+        for s in range(self.N):
+            w = np.diag(self.posterior[s])
+            X_weight = np.dot(w, self.X)
+            y_weight = np.dot(w, self.y)
+            fit_ += (self.coeffs[s]*X_weight).sum(axis = 1)
+            resid = y_weight-(self.coeffs[s]*X_weight).sum(axis = 1)
+            # resid1 = hmm_model.y-(coefs[0]*hmm_model.X).sum(axis = 1)
+            s2 = resid.T @ resid / (T - p)
+            var_b = s2 * np.linalg.inv(self.X.T @ w @ self.X)
+            se_b = np.sqrt(var_b)
+            t_s = self.coeffs[s] / se_b.diagonal()
+            # Degrees of freedom
+            df = T - p  # degrees of freedom (n - number of coefficients)
+            # Calculate p-values for coefficients
+            p_values = (1 - t.cdf(np.abs(t_s), df)) * 2
+            # pd.set_option('display.float_format', '{:.4f}'.format)
+            stats_b = np.column_stack((self.coeffs[s], se_b.diagonal(), t_s, p_values))
+            arr = np.concatenate((arr, stats_b), axis=1)
+        self.param_spec_df = pd.DataFrame(arr, index=self.col_names).reset_index().rename(columns={"index": "variable"})
+
+    def summary(self):
+        """
+        Print a summary of the fitted HMM regression model.
+        """
+        # self.stats()
+        self.get_param_spec()
+        # Create state probabilities dataframe for display
+        state_probs = pd.DataFrame(pd.Series(self.predict_states()).value_counts(normalize=True).sort_index())
+        state_probs.index = [f"regime_{i+1}" for i in state_probs.index]
+        state_probs[state_probs.select_dtypes(include='number').columns] = (
+            state_probs.select_dtypes(include='number')
+                .applymap(lambda x: f"{x:.3f}")
+        )
+        state_probs = state_probs.T
+        reg_vars = pd.DataFrame([{f"regime_{i+1}": f"{v:.3f}" for i, v in enumerate(np.round(self.stds**2, 3))}])
+        # Transition matrix dataframe
+        tm = pd.DataFrame(self.A)
+        tm.columns = [f"regime_{i+1}" for i in range(tm.shape[1])]
+        tm.index = [f"regime_{i+1}" for i in range(tm.shape[0])]
+        tm_df = tm.reset_index().rename(columns={"index": ""})
+        tm_df[tm_df.select_dtypes(include='number').columns] = (
+            tm_df.select_dtypes(include='number')
+                .applymap(lambda x: f"{x:.3f}"))      
+
+        ## Data info
+        data = {"dep. Variable": self.target_col, "n_obs": len(self.y), "df_model": self.coeffs.shape[1]}
+        data_df = pd.DataFrame([data]).T
+        data_df.rename(columns={0: " "}, inplace=True)
+        data_df = data_df.reset_index().rename(columns={"index": ""})
+
+        # diagnostics
+        diagn = {"overall_R-squared": round(self.r2, 3)}
+        regime_r2s = {f"regime_{i+1}_R-squared": round(j, 3) for i, j in enumerate(self.regime_r2)}
+        # append both dictionaries
+        diagn.update(regime_r2s)
+        pd.DataFrame([diagn])
+        how_fit = {f"log-likelihood": round(self.loglik, 1), "AIC": round(self.AIC, 1), "BIC": round(self.BIC, 1)}
+        diagn.update(how_fit)
+        # make_main_gt, gt_mini, inject_header_table_groups
+        gt_maint = make_main_gt(self.param_spec_df, n_regimes=self.N)
+
+        gt_final = inject_header_table_groups(
+            gt_maint,
+            columns=[
+                [("Regime probabilities", state_probs, True), ("Regime variances", reg_vars, True)],
+                [("Transition probabilities", tm_df, True)],
+                [("Data", data_df, False)],                 # title only → one line        
+                [("Diagnostics", diagn, False)],
+            ],
+            subtitle_text="Regime-switching hidden markov regression model results")
+        return gt_final
+
+
+        
+
 # Hidden Markov Model with Vector Autoregressive (VAR)
 
 class MsHmmVar:
