@@ -1658,6 +1658,11 @@ class MsHmmRegression:
         pd.DataFrame([diagn])
         how_fit = {f"log-likelihood": round(self.loglik, 1), "AIC": round(self.AIC, 1), "BIC": round(self.BIC, 1)}
         diagn.update(how_fit)
+
+        diagnosis_df = pd.DataFrame([diagn]).T
+        diagnosis_df.rename(columns={0: "diagnostics"}, inplace=True)
+        diagnosis_df = diagnosis_df.reset_index().rename(columns={"index": ""})
+
         # make_main_gt, gt_mini, inject_header_table_groups
         gt_maint = make_main_gt(self.param_spec_df, n_regimes=self.N)
 
@@ -1667,7 +1672,7 @@ class MsHmmRegression:
                 [("Regime probabilities", state_probs, True), ("Regime variances", reg_vars, True)],
                 [("Transition probabilities", tm_df, True)],
                 [("Data", data_df, False)],                 # title only → one line        
-                [("Diagnostics", diagn, False)],
+                [("Diagnostics", diagnosis_df, False)],
             ],
             subtitle_text="Regime-switching hidden markov regression model results")
         return gt_final
