@@ -2381,9 +2381,15 @@ class MsHmmVar:
         column_labels_padding=f"{col_labels_padding}px"  # tighten header band
         )
 
-        self.cov_table_results = cov_table(self.cov_matrixes, font_size_px=cov_font_size)
-
         return gt_final
+    
+    def cov_results(self, cov_font_size=350):
+        """
+        Generate covariance matrix tables for each regime using gt.
+        Args:
+            cov_font_size (int): Font size for the covariance matrix tables.
+        """
+        return cov_table(self.cov_matrixes, font_size_px=cov_font_size)
 
 
 
