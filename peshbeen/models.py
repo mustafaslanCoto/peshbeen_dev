@@ -2374,15 +2374,16 @@ class MsHmmVar:
                 [("Regime probabilities", self.regime_probs, True), ("Transition probabilities", self.tm_df, True)],
                 [("Data", self.data_inf, False), ("Diagnostics", self.data_fit, False)]
             ],
-            subtitle_text="Regime-switching hidden markov regression model results"
+            subtitle_text="Regime-switching hidden markov VAR model results"
         ).tab_options(
         table_font_size=f"{font_size}px",          # shrink all text
         data_row_padding=f"{row_padding}px",          # tighten row height
         column_labels_padding=f"{col_labels_padding}px"  # tighten header band
         )
-        cov_table_results = cov_table(self.cov_matrixes, font_size_px=cov_font_size)
 
-        return gt_final, cov_table_results
+        self.cov_table_results = cov_table(self.cov_matrixes, font_size_px=cov_font_size)
+
+        return gt_final
 
 
 
