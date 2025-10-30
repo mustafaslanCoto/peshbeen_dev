@@ -27,7 +27,7 @@ from peshbeen.transformations import (box_cox_transform, back_box_cox_transform,
                         expanding_mean, expanding_std, expanding_quantile)
 from peshbeen.model_selection import ParametricTimeSeriesSplit
 from peshbeen.stattools import lr_trend_model, forecast_trend
-from peshbeen.formatting import make_main_gt, gt_mini, inject_header_table_groups, cov_table
+from peshbeen.formatting import make_main_gt, gt_mini, inject_header_table_groups, cov_table, make_var_gt_regimes
 from catboost import CatBoostRegressor
 from cubist import Cubist
 # dot not show warnings
@@ -2315,7 +2315,7 @@ class MsHmmVar:
         self.param_spec_df = multi_vr
 
         state_probs = pd.DataFrame(pd.Series(self.predict_states()).value_counts(normalize=True).sort_index())
-        state_probs.index = [f"regime_{i+1}" for i in self.N]
+        state_probs.index = [f"regime_{i+1}" for i in range(self.N)]
         state_probs[state_probs.select_dtypes(include='number').columns] = (
             state_probs.select_dtypes(include='number')
                 .applymap(lambda x: f"{x:.3f}")
@@ -2366,7 +2366,7 @@ class MsHmmVar:
             cov_font_size (int): Font size for the covariance matrix tables.
         """
         self.get_param_spec()
-        gt_maint = make_main_gt(self.param_spec_df, n_regimes=self.N)
+        gt_maint = make_var_gt_regimes(self.param_spec_df, n_regimes=self.N)
 
         gt_final = inject_header_table_groups(
             gt_maint,
