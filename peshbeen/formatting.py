@@ -1,4 +1,5 @@
 from great_tables import GT, html
+from IPython.display import HTML, display
 def make_main_gt(df,
                     n_regimes: int,
                     inner_labels=None,
@@ -132,3 +133,27 @@ def inject_header_table_groups(gt_main, columns, subtitle_text,
     <div class="gt-mini-grid">{''.join(col_html)}</div>
     """
     return gt_main.tab_header(title="Model summary", subtitle=html(f"<div>{subtitle_text}</div>{block}"))
+
+def cov_table(cov_matrixes, font_size_px=350):
+    gt_tables = [
+        GT(df).tab_header(title=title)
+          .tab_options(
+              heading_border_bottom_style="solid",
+              heading_border_bottom_width="2px",
+              heading_border_bottom_color="#444",    # darker for visibility
+          )
+        for title, df in cov_matrixes
+    ]
+
+    # Export each GT to inline HTML
+    html_tables = [gt.as_raw_html(inline_css=True) for gt in gt_tables]
+
+    # Combine them horizontally using flexbox
+    combined_html = (
+        '<div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-start;">'
+        + "".join([f'<div style="flex:0 1 {font_size_px}px;">{html}</div>' for html in html_tables])
+        + "</div>"
+    )
+
+    # Display in notebook or Quarto
+    return display(HTML(combined_html))

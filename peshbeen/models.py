@@ -27,7 +27,7 @@ from peshbeen.transformations import (box_cox_transform, back_box_cox_transform,
                         expanding_mean, expanding_std, expanding_quantile)
 from peshbeen.model_selection import ParametricTimeSeriesSplit
 from peshbeen.stattools import lr_trend_model, forecast_trend
-from peshbeen.formatting import make_main_gt, gt_mini, inject_header_table_groups
+from peshbeen.formatting import make_main_gt, gt_mini, inject_header_table_groups, cov_table
 from catboost import CatBoostRegressor
 from cubist import Cubist
 # dot not show warnings
@@ -1620,13 +1620,13 @@ class MsHmmRegression:
             arr = np.concatenate((arr, stats_b), axis=1)
         self.param_spec_df = pd.DataFrame(arr, index=self.col_names).reset_index().rename(columns={"index": "variable"})
 
-    def summary(self, table_font_size="12px", data_row_padding="4px", column_labels_padding="4px"):
+    def summary(self, font_size=12, row_padding=4, col_labels_padding=4):
         """
         Print a summary of the fitted HMM regression model.
         Args:
-            table_font_size (str): Font size for the summary table.
-            data_row_padding (str): Padding for data rows in the summary table.
-            column_labels_padding (str): Padding for column labels in the summary table.
+            font_size (str): Font size for the summary table.
+            row_padding (str): Padding for data rows in the summary table.
+            col_labels_padding (str): Padding for column labels in the summary table.
         Returns:
             gt.Table: A gt table object containing the model summary.
         """
@@ -1681,9 +1681,9 @@ class MsHmmRegression:
                 [("Diagnostics", diagnosis_df, False)],
             ],
             subtitle_text="Regime-switching hidden markov regression model results").tab_options(
-        table_font_size=table_font_size,          # shrink all text
-        data_row_padding=data_row_padding,          # tighten row height
-        column_labels_padding=column_labels_padding  # tighten header band
+        table_font_size=f"{font_size}px",          # shrink all text
+        data_row_padding=f"{row_padding}px",          # tighten row height
+        column_labels_padding=f"{col_labels_padding}px"  # tighten header band
         )
         return gt_final
 
@@ -2266,120 +2266,124 @@ class MsHmmVar:
                     )
 
         return forecasts
+    
+    def get_param_spec(self):
+        """
+        Get the model parameters: coefficients, stds, initial state distribution, transition matrix.
+        """
 
-### Slow version of forecast with ets and LR
+        T = len(self.y)
+        p = sum(self.coeffs.shape)
+        df = T - p  # degrees of freedom
+        # create empty NxY.shape[1]x1 array to store results
+        results = np.empty((self.y.shape[1], self.N, 4, self.coeffs.shape[1]))
+        for s in range(self.N):
+            xw = self.posterior[s][:, None] * self.X
+            yw = self.posterior[s][:, None]* self.y
+            yw_fit = self.coeffs[s, :, :].T @ xw.T
+            resid = yw - yw_fit.T
 
-    # def forecast(self, H, exog=None):
-    #     """
-    #     Forecast H periods ahead using fitted HMM regression (log-domain version), with advanced post-processing.
+            res_cov = (resid.T @ resid)/df # calculate residual covariance matrix
+            cov_diag = res_cov.diagonal()
+            w_d = np.diag(self.posterior[s]) # weight diagonal matrix
+            XtWX_1 = np.linalg.inv(self.X.T @ w_d @ self.X)
+            var_b = cov_diag[:, None, None] * XtWX_1[None, :, :]
 
-    #     Handles:
-    #     - Trend re-adjustment (linear/ETS)
-    #     - Seasonal differencing reversal
-    #     - Regular differencing reversal
-    #     - Box-Cox back-transform
-    #     - Exogenous variables
-    #     - Lag transformations
-    #     """
-    #     y_list = self.y.tolist()
-    #     forecasts_ = []
-    #     N = self.N
+            se_b = np.sqrt(var_b)
+            t_s = self.coeffs[s, :, :].T / np.diagonal(se_b, axis1=1, axis2=2)
 
-    #     # Prepare exogenous future regressors if provided
-    #     if exog is not None:
-    #         if self.cons:
-    #             if exog.shape[0] == 1:
-    #                 exog.insert(0, 'const', 1)
-    #             else:
-    #                 exog = sm.add_constant(exog)
-    #         exog = np.array(self.data_prep(exog))
+            from scipy.stats import t
+            p_values = (1 - t.cdf(np.abs(t_s), df)) * 2
+            for i in range(self.y.shape[1]):
+                results[i, s, 0, :] = self.coeffs[s, :, i]   # (13,)
+                results[i, s, 1, :] = np.diagonal(se_b, axis1=1, axis2=2)[i]                     # (13,)
+                results[i, s, 2, :] = t_s[i]                         # (13,)
+                results[i, s, 3, :] = p_values[i]                    # (13,)
 
-    #     # Prepare for trend adjustment
-    #     # This assumes you stored original target (pre-trend removal) in self.target_orig
-    #     if hasattr(self, 'target_orig') and self.trend is not None:
-    #         orig_targets = self.target_orig.tolist()  # Used to re-add trend during forecasting
+        arrs = np.vstack(
+            [
+                np.concatenate([results[i, j, :, :].T for j in range(results.shape[1])], axis=1)
+                for i in range(self.y.shape[1])
+            ]
+        )
+        multi_vr = pd.DataFrame(arrs, index=self.col_names*self.y.shape[1]).reset_index().rename(columns={"index": "variable"})
 
-    #     # Init with last forward distribution (in log)
-    #     log_forward_last = self.log_forward[:, -1]
-    #     logA = np.log(self.A + 1e-300)
+        grp = [f"Results for equation {i}" for i in self.target_col
+                                for _ in range(self.coeffs.shape[1])]
+        multi_vr.columns.get_loc('variable') + 1
+        multi_vr.insert(loc=1, column='group', value=grp)
+        self.param_spec_df = multi_vr
 
-    #     # Forward
-    #     log_alpha = np.empty((N, H))
-    #     log_alpha[:, 0] = logsumexp(log_forward_last[:, None] + logA, axis=0)
-    #     for t in range(1, H):
-    #         # log_alpha[:,t] = logB[:,t] + logsumexp_i( log_alpha[i,t-1] + logA[i,:] )
-    #         log_alpha[:, t] = logsumexp(log_alpha[:, t-1][:, None] + logA, axis=0)
+        state_probs = pd.DataFrame(pd.Series(self.predict_states()).value_counts(normalize=True).sort_index())
+        state_probs.index = [f"regime_{i+1}" for i in self.N]
+        state_probs[state_probs.select_dtypes(include='number').columns] = (
+            state_probs.select_dtypes(include='number')
+                .applymap(lambda x: f"{x:.3f}")
+        )
+        self.regime_probs = state_probs.T
 
-    #     log_alpha -= logsumexp(log_alpha, axis=0)
-    #     self.forecast_forward = np.exp(log_alpha)
-    #     self.state_forecasts = np.argmax(self.forecast_forward, axis=0)
+        tm = pd.DataFrame(self.A)
+        tm.columns = [f"regime_{i+1}" for i in range(self.A.shape[1])]
+        tm.index = [f"regime_{i+1}" for i in range(self.A.shape[1])]
+
+        tm_df = tm.reset_index().rename(columns={"index": ""})
+        tm_df[tm_df.select_dtypes(include='number').columns] = (
+            tm_df.select_dtypes(include='number')
+                .applymap(lambda x: f"{x:.3f}"))
+        self.tm_df = tm_df
+
+        how_fit = {f"log-likelihood": round(self.loglik, 1), "AIC": round(self.AIC, 1), "BIC": round(self.BIC, 1)}
+
+        ## other information
+        data_info = {"dep. Variable": self.target_col, "n_obs": len(self.y), "df_model": sum(self.coeffs.shape)}
+        data_info = pd.DataFrame(data_info)
+        data_info.iloc[0, 0] = ", ".join(self.target_col)
+        data_inf = pd.DataFrame(data_info.T.iloc[:, 0]).reset_index().rename(columns={"index": ""})
+        self.data_inf = data_inf.rename(columns={0: " "})
+
+        data_fit = pd.DataFrame(how_fit, index=[0]).T.reset_index().rename(columns={"index": ""})
+        self.data_fit = data_fit.rename(columns={0: " "})
+
+        def create_cov_df(s):
+            covs = pd.DataFrame(self.covs[s])
+            covs.columns = [t for t in self.target_col]
+            covs.index = [t for t in self.target_col]
+            covs_df = covs.reset_index().rename(columns={"index": ""})
+            covs_df[covs_df.select_dtypes(include='number').columns] = (
+                covs_df.select_dtypes(include='number')
+                    .applymap(lambda x: f"{x:.3f}")) 
+            return covs_df
+        
+        self.cov_matrixes = [(f"Covariance matrix for regime {i}", create_cov_df(i)) for i in range(self.N)]
+
+    def summary(self, font_size=10, row_padding=4, col_labels_padding=4, cov_font_size=350):
+        """
+        Generate a summary table of the model results using gt.
+        Args:
+            font_size (str): Font size for the summary table text.
+            row_padding (str): Padding for the data rows in the summary table.
+            col_labels_padding (str): Padding for the column labels in the summary table.
+            cov_font_size (int): Font size for the covariance matrix tables.
+        """
+        self.get_param_spec()
+        gt_maint = make_main_gt(self.param_spec_df, n_regimes=self.N)
+
+        gt_final = inject_header_table_groups(
+            gt_maint,
+            columns=[
+                [("Regime probabilities", self.regime_probs, True), ("Transition probabilities", self.tm_df, True)],
+                [("Data", self.data_inf, False), ("Diagnostics", self.data_fit, False)]
+            ],
+            subtitle_text="Regime-switching hidden markov regression model results"
+        ).tab_options(
+        table_font_size=f"{font_size}px",          # shrink all text
+        data_row_padding=f"{row_padding}px",          # tighten row height
+        column_labels_padding=f"{col_labels_padding}px"  # tighten header band
+        )
+        cov_table_results = cov_table(self.cov_matrixes, font_size_px=cov_font_size)
+
+        return gt_final, cov_table_results
 
 
-    #     for t in range(H):
-    #         if exog is not None:
-    #             exo_inp = exog[t].tolist()
-    #         else:
-    #             exo_inp = [1] if self.cons else []
-    #         lags = [y_list[-l] for l in self.lags]
-    #         transform_lag = []
-    #         if self.lag_transform is not None:
-    #             series_array = np.array(y_list)
-    #             for func in self.lag_transform:
-    #                 transform_lag.append(func(series_array, is_forecast=True).to_numpy()[-1])
-    #         inp = np.array(exo_inp + lags + transform_lag)
 
-    #         state_preds = np.zeros(N)
-    #         for j in range(N):
-    #             mu = np.dot(self.coeffs[j], inp)
-    #             state_preds[j] = mu
 
-    #         # normalize to probabilities
-
-    #         # normalize to probabilities
-    #         pred_w = np.sum(self.forecast_forward[:, t] * state_preds)
-    #         forecasts_.append(pred_w)
-    #         y_list.append(pred_w)
-
-    #         # --- Trend re-adjustment ---
-    #         if self.trend is not None:
-    #             if self.trend == "linear":
-    #                 # Fit a linear trend on original targets
-    #                 trend_fit = LinearRegression().fit(
-    #                     np.arange(len(orig_targets)).reshape(-1, 1),
-    #                     np.array(orig_targets)
-    #                 )
-    #                 trend_forecast = trend_fit.predict(np.array([[len(orig_targets)]]))[0]
-    #             elif self.trend == "ets":
-    #                 # Fit an ETS model and forecast next point
-    #                 trend_fit = ExponentialSmoothing(
-    #                     np.array(orig_targets),
-    #                     **self.ets_model
-    #                 ).fit(**self.ets_fit)
-    #                 trend_forecast = trend_fit.forecast(1)[0]
-    #             else:
-    #                 trend_forecast = 0.0  # fallback
-
-    #             orig_forecast = pred_w + trend_forecast
-    #             forecasts_[-1] = orig_forecast    # overwrite with trend-adjusted value
-    #             orig_targets.append(orig_forecast)  # update for next lag/trend step
-
-    #         # log_forward_last = log_f_t.copy()
-
-    #     forecasts = np.array(forecasts_)
-
-    #     # --- Revert seasonal differencing if applied ---
-    #     if self.season_diff is not None:
-    #         forecasts = invert_seasonal_diff(self.orig_d, forecasts, self.season_diff)
-
-    #     # --- Revert regular differencing if applied ---
-    #     if self.diff is not None:
-    #         forecasts = undiff_ts(self.orig, forecasts, self.diff)
-
-    #     # --- Box-Cox back-transform if applied ---
-    #     if self.box_cox:
-    #         forecasts = back_box_cox_transform(
-    #             y_pred=forecasts, lmda=self.lamda,
-    #             shift=self.is_zero, box_cox_biasadj=self.biasadj
-    #         )
-
-    #     return forecasts
