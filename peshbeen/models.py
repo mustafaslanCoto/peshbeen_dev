@@ -2111,6 +2111,8 @@ class MsHmmVar:
             prev_ll = self.LL
             for _ in range(n_iter):
                 self.EM()
+                if self.verb:
+                    print(f"Iter {_}: loglik={self.LL:.4f}")
                 if abs(self.LL - prev_ll) < self.tol:
                     break
                 else:
