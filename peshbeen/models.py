@@ -238,7 +238,7 @@ class ml_forecaster:
         aic = n * np.log(rss / n) + 2 * k # AIC formula: https://otexts.com/fpp3/selecting-predictors.html
         return aic
 
-    # @property
+    @property
     def BIC(self):
         if isinstance(self.model, (LinearRegression, Ridge, Lasso, ElasticNet)):
             k = self.X.shape[1] + 1 + 1  # number of parameters: regression coeffs + intercept + variance
