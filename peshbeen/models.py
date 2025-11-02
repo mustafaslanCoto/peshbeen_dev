@@ -226,6 +226,29 @@ class ml_forecaster:
         else:
             self.model_fit = model_.fit(self.X, self.y)
 
+
+    @property
+    def AIC(self):
+        if isinstance(self.model, (LinearRegression, Ridge, Lasso, ElasticNet)):
+            k = self.X.shape[1] + 1 + 1  # number of parameters: regression coeffs + intercept + variance
+        else:
+            k = self.X.shape[1] + 1  # number of parameters: regression coeffs + variance
+        n = len(self.y)  # effective number of observations
+        rss = np.sum((self.y.to_numpy() - self.model_fit.predict(self.X))**2)
+        aic = n * np.log(rss / n) + 2 * k # AIC formula: https://otexts.com/fpp3/selecting-predictors.html
+        return aic
+
+    # @property
+    def BIC(self):
+        if isinstance(self.model, (LinearRegression, Ridge, Lasso, ElasticNet)):
+            k = self.X.shape[1] + 1 + 1  # number of parameters: regression coeffs + intercept + variance
+        else:
+            k = self.X.shape[1] + 1  # number of parameters: regression coeffs + variance
+        n = len(self.y)  # effective number of observations
+        rss = np.sum((self.y.to_numpy() - self.model_fit.predict(self.X))**2)
+        bic = n * np.log(rss / n) + k * np.log(n) # BIC formula: https://otexts.com/fpp3/selecting-predictors.html
+        return bic
+
     def copy(self):
         return copy.deepcopy(self)
 
@@ -1441,7 +1464,7 @@ class MsHmmRegression:
     # AIC computation    
     @property
     def AIC(self):
-        k = self.N * self.X.shape[1] + self.N ** 2 + self.N - 1
+        k = self.N * self.X.shape[1] + self.N ** 2 + self.N - 1 # number of parameters: regression coeffs + transition matrix + initial state probs
         return 2 * k - 2 * self.LL
 
     @property
