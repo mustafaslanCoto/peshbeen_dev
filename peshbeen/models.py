@@ -585,6 +585,40 @@ class VARModel:
         """
         arr = np.array(X)
         return np.dot(self.coeffs.T, arr.T)
+    
+    @property
+    def AIC(self):
+        res = self.y - self.predict(self.X).T
+        K = self.y.shape[1]
+
+        p_lag = list(self.n_lag.values()) # list of lags per target
+        if isinstance(p_lag[0], int): # if lags are given as integers
+            p = p_lag[0]
+        else:
+            p = len(p_lag[0])
+        q = self.X.shape[1] - p # of exogenous variables
+        total_params = (K**2) * p + K * q
+        n = self.y.shape[0]
+        det_cov = np.log(np.linalg.det(np.cov(res, rowvar=False))) # log determinant of residual covariance matrix
+        aic = det_cov + (2 * total_params) / n # AIC formula for VAR
+        return aic
+    
+    @property
+    def BIC(self):
+        res = self.y - self.predict(self.X).T
+        K = self.y.shape[1]
+
+        p_lag = list(self.n_lag.values()) # list of lags per target
+        if isinstance(p_lag[0], int): # if lags are given as integers
+            p = p_lag[0]
+        else:
+            p = len(p_lag[0])
+        q = self.X.shape[1] - p # of exogenous variables
+        total_params = (K**2) * p + K * q
+        n = self.y.shape[0]
+        det_cov = np.log(np.linalg.det(np.cov(res, rowvar=False))) # log determinant of residual covariance matrix
+        bic = det_cov + total_params * np.log(n) / n # BIC formula for VAR
+        return bic
 
     def copy(self):
         return copy.deepcopy(self)
