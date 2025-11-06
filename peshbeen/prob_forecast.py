@@ -6,9 +6,9 @@ from scipy.stats import gaussian_kde
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tsa.api import VAR
 
-class ml_conformalizer():
+class ml_prob_forecasts():
     """
-    Conformal prediction for time series forecasting. It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
+    Probabilistic forecasting for ML models. It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
     Parameters:
     - delta: significance level for prediction intervals
     - model: forecasting model to be used
@@ -93,8 +93,7 @@ class ml_conformalizer():
         dist = y_forecast[:, None] + self.resid
         self.dist = pd.DataFrame(dist.T, columns=[f'h_{i+1}' for i in range(self.H)])
         self.dist = self.dist.clip(lower=0.1)
-        return pd.DataFrame(np.column_stack(result), columns=col_names)
-    
+        return pd.DataFrame(np.column_stack(result), columns=col_names)    
 
     def sample_predictions(self, df, samples=1000, future_exog=None):
         """
@@ -172,10 +171,61 @@ class ml_conformalizer():
         bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
 
         return bootstrap_forecasts_df
+    
+    def simulate_correlated_forecasts(self, df, samples=1000, future_exog=None):
+        """
+        Simulate correlated errors to generate forecasts
+        Parameters:
+        - df: DataFrame containing the training data
+        - samples: number of samples to generate
+        - future_exog: optional exogenous variables for forecasting
+        Returns:
+        - DataFrame containing the simulated forecasts
+        """
+        if not hasattr(self, 'resid'):
+            raise RuntimeError("Residuals not available. Run .non_conformity_scores(df) .calibrate(df) or  first.")
+        self.model.fit(df)
+        if future_exog is not None:
+            y_forecast = np.array(self.model.forecast(self.H, future_exog))
+        else:
+            y_forecast = np.array(self.model.forecast(self.H))
 
-class var_conformalizer():
+        mu = np.mean(self.resid.T, axis=0)
+        sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
+
+        samples = np.random.multivariate_normal(mu, sigma_, size=samples)
+        w_samples = samples + y_forecast
+        self.correlated_forecasts = pd.DataFrame(w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
+        # Generate conformal prediction intervals using sampled residuals
+        if isinstance(self.delta, float):
+            low = (1-self.delta)/2
+            high = self.delta+(1-self.delta)/2
+        elif isinstance(self.delta, list):
+            low = [(1-x)/2 for x in self.delta]
+            high = [x+(1-x)/2 for x in self.delta]
+        else:
+            raise ValueError("delta must be float or list of floats.")
+
+        lower_bound = np.quantile(w_samples, low, method="lower", axis=0)
+        upper_bound = np.quantile(w_samples, high, method="higher", axis=0)
+
+        result = [y_forecast]
+        col_names = ["point_forecast"]
+
+        if isinstance(self.delta, float):
+            result.extend([lower_bound, upper_bound])
+            col_names.extend([f'lower_{int(self.delta*100)}', f'upper_{int(self.delta*100)}'])
+        elif isinstance(self.delta, list):
+            for idx, d in enumerate(self.delta):
+                result.extend([lower_bound[idx], upper_bound[idx]])
+                col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
+        correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+
+        return correlated_forecasts_df
+
+class var_prob_forecasts():
     """
-    Conformal prediction for vektor autoregressive time series forecasting.
+    Probabilistic forecasting for vector autoregressive time series forecasting.
     It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
     Parameters:
     - delta: significance level for prediction intervals
@@ -370,9 +420,60 @@ class var_conformalizer():
 
         return bootstrap_forecasts_df
     
-class hmm_conformalizer():
+    def simulate_correlated_forecasts(self, df, samples=1000, future_exog=None):
+        """
+        Simulate correlated errors to generate forecasts
+        Parameters:
+        - df: DataFrame containing the training data
+        - samples: number of samples to generate
+        - future_exog: optional exogenous variables for forecasting
+        Returns:
+        - DataFrame containing the simulated forecasts
+        """
+        if not hasattr(self, 'resid'):
+            raise RuntimeError("Residuals not available. Run .non_conformity_scores(df) .calibrate(df) or  first.")
+        self.model.fit(df)
+        if future_exog is not None:
+            y_forecast = np.array(self.model.forecast(self.H, future_exog)[self.tar_col])
+        else:
+            y_forecast = np.array(self.model.forecast(self.H)[self.tar_col])
+
+        mu = np.mean(self.resid.T, axis=0)
+        sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
+
+        samples = np.random.multivariate_normal(mu, sigma_, size=samples)
+        w_samples = samples + y_forecast
+        self.correlated_forecasts = pd.DataFrame(w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
+        # Generate conformal prediction intervals using sampled residuals
+        if isinstance(self.delta, float):
+            low = (1-self.delta)/2
+            high = self.delta+(1-self.delta)/2
+        elif isinstance(self.delta, list):
+            low = [(1-x)/2 for x in self.delta]
+            high = [x+(1-x)/2 for x in self.delta]
+        else:
+            raise ValueError("delta must be float or list of floats.")
+
+        lower_bound = np.quantile(w_samples, low, method="lower", axis=0)
+        upper_bound = np.quantile(w_samples, high, method="higher", axis=0)
+
+        result = [y_forecast]
+        col_names = ["point_forecast"]
+
+        if isinstance(self.delta, float):
+            result.extend([lower_bound, upper_bound])
+            col_names.extend([f'lower_{int(self.delta*100)}', f'upper_{int(self.delta*100)}'])
+        elif isinstance(self.delta, list):
+            for idx, d in enumerate(self.delta):
+                result.extend([lower_bound[idx], upper_bound[idx]])
+                col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
+        correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+
+        return correlated_forecasts_df
+    
+class hmm_prob_forecasts():
     """
-    Conformal prediction for time series forecasting. It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
+    Probabilistic forecasting for Markov Switching Regression. It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
     Parameters:
     - delta: significance level for prediction intervals
     - model: forecasting model to be used
@@ -538,10 +639,61 @@ class hmm_conformalizer():
         bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
 
         return bootstrap_forecasts_df
+    
+    def simulate_correlated_forecasts(self, df, samples=1000, future_exog=None):
+        """
+        Simulate correlated errors to generate forecasts
+        Parameters:
+        - df: DataFrame containing the training data
+        - samples: number of samples to generate
+        - future_exog: optional exogenous variables for forecasting
+        Returns:
+        - DataFrame containing the simulated forecasts
+        """
+        if not hasattr(self, 'resid'):
+            raise RuntimeError("Residuals not available. Run .non_conformity_scores(df) .calibrate(df) or  first.")
+        self.model.fit(df, self.n_iter)
+        if future_exog is not None:
+            y_forecast = np.array(self.model.forecast(self.H, future_exog))
+        else:
+            y_forecast = np.array(self.model.forecast(self.H))
 
-class hmm_var_conformalizer():
+        mu = np.mean(self.resid.T, axis=0)
+        sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
+
+        samples = np.random.multivariate_normal(mu, sigma_, size=samples)
+        w_samples = samples + y_forecast
+        self.correlated_forecasts = pd.DataFrame(w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
+        # Generate conformal prediction intervals using sampled residuals
+        if isinstance(self.delta, float):
+            low = (1-self.delta)/2
+            high = self.delta+(1-self.delta)/2
+        elif isinstance(self.delta, list):
+            low = [(1-x)/2 for x in self.delta]
+            high = [x+(1-x)/2 for x in self.delta]
+        else:
+            raise ValueError("delta must be float or list of floats.")
+
+        lower_bound = np.quantile(w_samples, low, method="lower", axis=0)
+        upper_bound = np.quantile(w_samples, high, method="higher", axis=0)
+
+        result = [y_forecast]
+        col_names = ["point_forecast"]
+
+        if isinstance(self.delta, float):
+            result.extend([lower_bound, upper_bound])
+            col_names.extend([f'lower_{int(self.delta*100)}', f'upper_{int(self.delta*100)}'])
+        elif isinstance(self.delta, list):
+            for idx, d in enumerate(self.delta):
+                result.extend([lower_bound[idx], upper_bound[idx]])
+                col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
+        correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+
+        return correlated_forecasts_df
+
+class hmm_var_prob_forecasts():
     """
-    Conformal prediction for time series forecasting. It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
+    Probabilistic forecasting for Markov Switching VAR models. It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
     Parameters:
     - delta: significance level for prediction intervals
     - model: forecasting model to be used
@@ -708,10 +860,61 @@ class hmm_var_conformalizer():
         bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
 
         return bootstrap_forecasts_df
+    
+    def simulate_correlated_forecasts(self, df, samples=1000, future_exog=None):
+        """
+        Simulate correlated errors to generate forecasts
+        Parameters:
+        - df: DataFrame containing the training data
+        - samples: number of samples to generate
+        - future_exog: optional exogenous variables for forecasting
+        Returns:
+        - DataFrame containing the simulated forecasts
+        """
+        if not hasattr(self, 'resid'):
+            raise RuntimeError("Residuals not available. Run .non_conformity_scores(df) .calibrate(df) or  first.")
+        self.model.fit(df, self.n_iter)
+        if future_exog is not None:
+            y_forecast = np.array(self.model.forecast(self.H, future_exog)[self.tar_col])
+        else:
+            y_forecast = np.array(self.model.forecast(self.H)[self.tar_col])
 
-class ets_conformalizer():
+        mu = np.mean(self.resid.T, axis=0)
+        sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
+
+        samples = np.random.multivariate_normal(mu, sigma_, size=samples)
+        w_samples = samples + y_forecast
+        self.correlated_forecasts = pd.DataFrame(w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
+        # Generate conformal prediction intervals using sampled residuals
+        if isinstance(self.delta, float):
+            low = (1-self.delta)/2
+            high = self.delta+(1-self.delta)/2
+        elif isinstance(self.delta, list):
+            low = [(1-x)/2 for x in self.delta]
+            high = [x+(1-x)/2 for x in self.delta]
+        else:
+            raise ValueError("delta must be float or list of floats.")
+
+        lower_bound = np.quantile(w_samples, low, method="lower", axis=0)
+        upper_bound = np.quantile(w_samples, high, method="higher", axis=0)
+
+        result = [y_forecast]
+        col_names = ["point_forecast"]
+
+        if isinstance(self.delta, float):
+            result.extend([lower_bound, upper_bound])
+            col_names.extend([f'lower_{int(self.delta*100)}', f'upper_{int(self.delta*100)}'])
+        elif isinstance(self.delta, list):
+            for idx, d in enumerate(self.delta):
+                result.extend([lower_bound[idx], upper_bound[idx]])
+                col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
+        correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+
+        return correlated_forecasts_df
+
+class ets_prob_forecasts():
     """
-    Conformal prediction for time series forecasting. It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
+    Probabilistic forecasting for Exponential Smoothing State Space Model (ETS). It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
     Parameters:
     - delta: significance level for prediction intervals
     - ets_param: parameters for ETS model. A tuble of (dict, dict) where first dict is for ExponentialSmoothing() and second dict is for .fit()
@@ -870,10 +1073,60 @@ class ets_conformalizer():
         bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
 
         return bootstrap_forecasts_df
+
+    def simulate_correlated_forecasts(self, series, samples=1000):
+        """
+        Simulate correlated errors to generate forecasts
+        Parameters:
+        - df: DataFrame containing the training data
+        - samples: number of samples to generate
+        - future_exog: optional exogenous variables for forecasting
+        Returns:
+        - DataFrame containing the simulated forecasts
+        """
+        if not hasattr(self, 'resid'):
+            raise RuntimeError("Residuals not available. Run .non_conformity_scores(df) .calibrate(df) or  first.")
+
+        self.model = ExponentialSmoothing(series,
+                            **self.ets_param[0]).fit(**self.ets_param[1])
+        y_forecast = np.array(self.model.forecast(self.H))
+
+        mu = np.mean(self.resid.T, axis=0)
+        sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
+
+        samples = np.random.multivariate_normal(mu, sigma_, size=samples)
+        w_samples = samples + y_forecast
+        self.correlated_forecasts = pd.DataFrame(w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
+        # Generate conformal prediction intervals using sampled residuals
+        if isinstance(self.delta, float):
+            low = (1-self.delta)/2
+            high = self.delta+(1-self.delta)/2
+        elif isinstance(self.delta, list):
+            low = [(1-x)/2 for x in self.delta]
+            high = [x+(1-x)/2 for x in self.delta]
+        else:
+            raise ValueError("delta must be float or list of floats.")
+
+        lower_bound = np.quantile(w_samples, low, method="lower", axis=0)
+        upper_bound = np.quantile(w_samples, high, method="higher", axis=0)
+
+        result = [y_forecast]
+        col_names = ["point_forecast"]
+
+        if isinstance(self.delta, float):
+            result.extend([lower_bound, upper_bound])
+            col_names.extend([f'lower_{int(self.delta*100)}', f'upper_{int(self.delta*100)}'])
+        elif isinstance(self.delta, list):
+            for idx, d in enumerate(self.delta):
+                result.extend([lower_bound[idx], upper_bound[idx]])
+                col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
+        correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+
+        return correlated_forecasts_df
     
-class arima_conformalizer():
+class arima_prob_forecasts():
     """
-    Conformal prediction for time series forecasting. It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
+    Probabilistic forecasting for ARIMA model. It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
     Parameters:
     - delta: significance level for prediction intervals
     - model: ARIMA model instance supported by statsforecast (Nixtla)
@@ -1042,6 +1295,59 @@ class arima_conformalizer():
         bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
 
         return bootstrap_forecasts_df
+    
+    def simulate_correlated_forecasts(self, df, samples=1000, future_exog=None):
+        """
+        Simulate correlated errors to generate forecasts
+        Parameters:
+        - df: DataFrame containing the training data
+        - samples: number of samples to generate
+        - future_exog: optional exogenous variables for forecasting
+        Returns:
+        - DataFrame containing the simulated forecasts
+        """
+        if not hasattr(self, 'resid'):
+            raise RuntimeError("Residuals not available. Run .non_conformity_scores(df) .calibrate(df) or  first.")
+        y_train = df[self.target_col]
+        x_train = df.drop(columns=[self.target_col])
+        if future_exog is not None:
+            y_forecast = self.model.forecast(y=np.array(y_train), h=self.H, X=np.array(x_train),
+                    X_future=np.array(future_exog))["mean"]
+        else:
+            y_forecast = self.model.forecast(y=np.array(y_train), h=self.H, X=np.array(x_train))["mean"]
+
+        mu = np.mean(self.resid.T, axis=0)
+        sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
+
+        samples = np.random.multivariate_normal(mu, sigma_, size=samples)
+        w_samples = samples + y_forecast
+        self.correlated_forecasts = pd.DataFrame(w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
+        # Generate conformal prediction intervals using sampled residuals
+        if isinstance(self.delta, float):
+            low = (1-self.delta)/2
+            high = self.delta+(1-self.delta)/2
+        elif isinstance(self.delta, list):
+            low = [(1-x)/2 for x in self.delta]
+            high = [x+(1-x)/2 for x in self.delta]
+        else:
+            raise ValueError("delta must be float or list of floats.")
+
+        lower_bound = np.quantile(w_samples, low, method="lower", axis=0)
+        upper_bound = np.quantile(w_samples, high, method="higher", axis=0)
+
+        result = [y_forecast]
+        col_names = ["point_forecast"]
+
+        if isinstance(self.delta, float):
+            result.extend([lower_bound, upper_bound])
+            col_names.extend([f'lower_{int(self.delta*100)}', f'upper_{int(self.delta*100)}'])
+        elif isinstance(self.delta, list):
+            for idx, d in enumerate(self.delta):
+                result.extend([lower_bound[idx], upper_bound[idx]])
+                col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
+        correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+
+        return correlated_forecasts_df
     
 class bidirect_ts_conformalizer():
     def __init__(self, delta, train_df, col_index, n_windows, model, H, calib_metric = "mae", model_param=None):
