@@ -129,6 +129,132 @@ class ml_conformalizer():
         self.sampled_forecasts = pd.DataFrame(sampled_predictions, columns=[f'h_{i+1}' for i in range(self.H)])
         # generate quantiles from sampled predictions
         return self.conformalized_sample_predictions
+
+class var_conformalizer():
+    """
+    Conformal prediction for vektor autoregressive time series forecasting.
+    It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
+    Parameters:
+    - delta: significance level for prediction intervals
+    - model: forecasting model to be used
+    - target_col: one of the target columns in multivariate time series should be specified for conformalization
+    - n_calibration: number of calibration windows
+    - H: forecast horizon
+    - sliding_window: size of the sliding window for cross-validation
+    - verbose: whether to print progress messages
+    """
+    def __init__(self, delta, model, target_col, n_calibration, H, sliding_window=1, verbose=False):
+        self.delta = delta
+        self.model = model
+        self.tar_col = target_col
+        self.sliding_window = sliding_window
+        self.n_calib = n_calibration
+        self.verbose = verbose
+        self.H = H
+
+    def non_conformity_scores(self, df):
+        c_actuals, c_forecasts = [], []
+        # Create time series cross-validator that slides 1 time step for each training window
+        tscv = ParametricTimeSeriesSplit(n_splits=self.n_calib, test_size=self.H, step_size=self.sliding_window)
+        for train_index, test_index in tscv.split(df):
+            train, test = df.iloc[train_index], df.iloc[test_index]
+            x_test = test.drop(columns=self.model.target_cols)
+            y_test = np.array(test[self.tar_col])
+            self.model.fit(train)
+            H_forecasts = self.model.forecast(self.H, x_test)[self.tar_col]
+            c_forecasts.append(H_forecasts)
+            c_actuals.append(y_test)
+            if self.verbose:
+                print(f"Completed calibration window {len(c_forecasts)} out of {self.n_calib}")
+        self.resid = np.column_stack(c_actuals) - np.column_stack(c_forecasts) # Residuals n_calib*H
+        self.non_conform = np.abs(self.resid) # non-conformity scores
+        self.c_actuals = np.column_stack(c_actuals)
+        self.c_forecasts = np.column_stack(c_forecasts)
+        
+    def calculate_quantile(self, scores_calib):
+        # Vectorized quantile calculation for list delta
+        if isinstance(self.delta, float):
+            which_quantile = np.ceil(self.delta * (self.n_calib + 1)) / self.n_calib
+            return np.quantile(scores_calib, which_quantile, method="lower", axis=0)
+        elif isinstance(self.delta, list):
+            which_quantiles = np.ceil(np.array(self.delta) * (self.n_calib + 1)) / self.n_calib
+            return np.array([np.quantile(scores_calib, q, method="lower", axis=0) for q in which_quantiles])
+        else:
+            raise ValueError("delta must be float or list of floats.")
+    
+    
+    def calibrate(self, df):
+        self.non_conformity_scores(df=df)
+        h_quantiles = []
+        for i in range(self.H):
+            q_hat = self.calculate_quantile(self.non_conform[i])
+            h_quantiles.append(q_hat)
+        self.q_hat_D = np.array(h_quantiles)
+
+    # Generate prediction intervals using the calibrated quantiles
+
+    def generate_prediction_intervals(self, df, future_exog=None):
+        # Only calibrate if not already done
+        if not hasattr(self, 'q_hat_D'):
+            raise RuntimeError("Conformalizer must be calibrated before generating prediction intervals. Run .calibrate(df_calibration) first.")
+        self.model.fit(df)
+        if future_exog is not None:
+            y_forecast = np.array(self.model.forecast(self.H, future_exog)[self.tar_col])
+        else:
+            y_forecast = np.array(self.model.forecast(self.H)[self.tar_col])
+        result = [y_forecast]
+        col_names = ["point_forecast"]
+
+        if isinstance(self.delta, float):
+            y_lower, y_upper = y_forecast - self.q_hat_D, y_forecast + self.q_hat_D
+            result.extend([y_lower, y_upper])
+            col_names.extend([f'lower_{int(self.delta*100)}', f'upper_{int(self.delta*100)}'])
+        elif isinstance(self.delta, list):
+            for idx, d in enumerate(self.delta):
+                y_lower = y_forecast - self.q_hat_D[:, idx]
+                y_upper = y_forecast + self.q_hat_D[:, idx]
+                result.extend([y_lower, y_upper])
+                col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
+        # distributions for each horizons. So add y_forecast array to each columns of self.resid and equal to self.dist
+        dist = y_forecast[:, None] + self.resid
+        self.dist = pd.DataFrame(dist.T, columns=[f'h_{i+1}' for i in range(self.H)])
+        return pd.DataFrame(np.column_stack(result), columns=col_names)
+
+    def sample_predictions(self, df, samples=1000, future_exog=None):
+        """
+        Generate samples from the predictive distribution generated by residuals from conformal prediction.
+        The samples are drawn from a Gaussian kernel density estimate of the residuals.
+        """
+        # Return a random sample from Gaussian Kernel density estimation
+        if not hasattr(self, 'resid'):
+            raise RuntimeError("Residuals not available. Run .non_conformity_scores(df) .calibrate(df) or  first.")
+        self.model.fit(df)
+        if future_exog is not None:
+            y_forecast = np.array(self.model.forecast(self.H, future_exog)[self.tar_col])
+        else:
+            y_forecast = np.array(self.model.forecast(self.H)[self.tar_col])
+        sampled_resids = np.column_stack([gaussian_kde(self.resid[:, i]).resample(size=samples)[0] for i in range(self.H)]) #  sample from the distribution approximated by KDE
+        sampled_predictions = sampled_resids + y_forecast[:, None].T # add the forecast to the sampled residuals
+
+        # Generate conformal prediction intervals using sampled residuals
+        result = [y_forecast]
+        col_names = ["point_forecast"]
+        # absolute sample residuals for non-conformity scores:
+        abs_sampled_resids = np.abs(sampled_resids)
+        quantiles = self.calculate_quantile(abs_sampled_resids)
+        if isinstance(self.delta, float):
+            y_lower, y_upper = y_forecast - quantiles, y_forecast + quantiles
+            result.extend([y_lower, y_upper])
+            col_names.extend([f'lower_{int(self.delta*100)}', f'upper_{int(self.delta*100)}'])
+        elif isinstance(self.delta, list):
+            for idx, d in enumerate(self.delta):
+                y_lower, y_upper = y_forecast - quantiles[idx], y_forecast + quantiles[idx]
+                result.extend([y_lower, y_upper])
+                col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
+        self.conformalized_sample_predictions = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.sampled_forecasts = pd.DataFrame(sampled_predictions, columns=[f'h_{i+1}' for i in range(self.H)])
+        # generate quantiles from sampled predictions
+        return self.conformalized_sample_predictions
     
 class hmm_conformalizer():
     """
@@ -256,6 +382,132 @@ class hmm_conformalizer():
         # generate quantiles from sampled predictions
         return self.conformalized_sample_predictions
 
+class hmm_var_conformalizer():
+    """
+    Conformal prediction for time series forecasting. It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
+    Parameters:
+    - delta: significance level for prediction intervals
+    - model: forecasting model to be used
+    - n_calibration: number of calibration windows
+    - H: forecast horizon
+    - sliding_window: size of the sliding window for cross-validation
+    - n_iter: number of iterations for HMM fitting
+    - verbose: whether to print progress messages
+    """
+    def __init__(self, delta, model, target_col, n_calibration, H, sliding_window=1, n_iter=1, verbose=False):
+        self.delta = delta
+        self.model = model
+        self.tar_col = target_col
+        self.sliding_window = sliding_window
+        self.n_calib = n_calibration
+        self.n_iter = n_iter
+        self.verbose = verbose
+        self.H = H
+
+    def non_conformity_scores(self, df):
+        c_actuals, c_forecasts = [], []
+        # Create time series cross-validator that slides 1 time step for each training window
+        tscv = ParametricTimeSeriesSplit(n_splits=self.n_calib, test_size=self.H, step_size=self.sliding_window)
+        for train_index, test_index in tscv.split(df):
+            train, test = df.iloc[train_index], df.iloc[test_index]
+            x_test = test.drop(columns=self.model.target_col)
+            y_test = np.array(test[self.tar_col])
+            self.model.fit(train, self.n_iter)
+            H_forecasts = self.model.forecast(self.H, x_test)[self.tar_col]
+            c_forecasts.append(H_forecasts)
+            c_actuals.append(y_test)
+            if self.verbose:
+                print(f"Completed calibration window {len(c_forecasts)} out of {self.n_calib}")
+        self.resid = np.column_stack(c_actuals) - np.column_stack(c_forecasts) # Residuals n_calib*H
+        self.non_conform = np.abs(self.resid) # non-conformity scores
+        self.c_actuals = np.column_stack(c_actuals)
+        self.c_forecasts = np.column_stack(c_forecasts)
+
+        
+    def calculate_quantile(self, scores_calib):
+        # Vectorized quantile calculation for list delta
+        if isinstance(self.delta, float):
+            which_quantile = np.ceil(self.delta * (self.n_calib + 1)) / self.n_calib
+            return np.quantile(scores_calib, which_quantile, method="lower", axis=0)
+        elif isinstance(self.delta, list):
+            which_quantiles = np.ceil(np.array(self.delta) * (self.n_calib + 1)) / self.n_calib
+            return np.array([np.quantile(scores_calib, q, method="lower", axis=0) for q in which_quantiles])
+        else:
+            raise ValueError("delta must be float or list of floats.")
+    
+    
+    def calibrate(self, df):
+        self.non_conformity_scores(df=df)
+        h_quantiles = []
+        for i in range(self.H):
+            q_hat = self.calculate_quantile(self.non_conform[i])
+            h_quantiles.append(q_hat)
+        self.q_hat_D = np.array(h_quantiles)
+
+    # Generate prediction intervals using the calibrated quantiles
+
+    def generate_prediction_intervals(self, df, future_exog=None):
+        # Only calibrate if not already done
+        if not hasattr(self, 'q_hat_D'):
+            raise RuntimeError("Conformalizer must be calibrated before generating prediction intervals. Run .calibrate(df_calibration) first.")
+        self.model.fit(df, self.n_iter)
+        if future_exog is not None:
+            y_forecast = np.array(self.model.forecast(self.H, future_exog)[self.tar_col])
+        else:
+            y_forecast = np.array(self.model.forecast(self.H)[self.tar_col])
+        result = [y_forecast]
+        col_names = ["point_forecast"]
+
+        if isinstance(self.delta, float):
+            y_lower, y_upper = y_forecast - self.q_hat_D, y_forecast + self.q_hat_D
+            result.extend([y_lower, y_upper])
+            col_names.extend([f'lower_{int(self.delta*100)}', f'upper_{int(self.delta*100)}'])
+        elif isinstance(self.delta, list):
+            for idx, d in enumerate(self.delta):
+                y_lower = y_forecast - self.q_hat_D[:, idx]
+                y_upper = y_forecast + self.q_hat_D[:, idx]
+                result.extend([y_lower, y_upper])
+                col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
+        # distributions for each horizons. So add y_forecast array to each columns of self.resid and equal to self.dist
+        dist = y_forecast[:, None] + self.resid
+        self.dist = pd.DataFrame(dist.T, columns=[f'h_{i+1}' for i in range(self.H)])
+        return pd.DataFrame(np.column_stack(result), columns=col_names)
+
+    def sample_predictions(self, samples=1000, df=None, future_exog=None):
+        """
+        Generate samples from the predictive distribution generated by residuals from conformal prediction.
+        The samples are drawn from a Gaussian kernel density estimate of the residuals.
+        """
+        # Return a random sample from Gaussian Kernel density estimation
+        if not hasattr(self, 'resid'):
+            raise RuntimeError("Residuals not available. Run .non_conformity_scores(df) .calibrate(df) or  first.")
+        self.model.fit(df, self.n_iter)
+        if future_exog is not None:
+            y_forecast = np.array(self.model.forecast(self.H, future_exog)[self.tar_col])
+        else:
+            y_forecast = np.array(self.model.forecast(self.H)[self.tar_col])
+        sampled_resids = np.column_stack([gaussian_kde(self.resid[:, i]).resample(size=samples)[0] for i in range(self.H)]) #  sample from the distribution approximated by KDE
+        sampled_predictions = sampled_resids + y_forecast[:, None].T # add the forecast to the sampled residuals
+
+        # Generate conformal prediction intervals using sampled residuals
+        result = [y_forecast]
+        col_names = ["point_forecast"]
+        # absolute sample residuals for non-conformity scores:
+        abs_sampled_resids = np.abs(sampled_resids)
+        quantiles = self.calculate_quantile(abs_sampled_resids)
+        if isinstance(self.delta, float):
+            y_lower, y_upper = y_forecast - quantiles, y_forecast + quantiles
+            result.extend([y_lower, y_upper])
+            col_names.extend([f'lower_{int(self.delta*100)}', f'upper_{int(self.delta*100)}'])
+        elif isinstance(self.delta, list):
+            for idx, d in enumerate(self.delta):
+                y_lower, y_upper = y_forecast - quantiles[idx], y_forecast + quantiles[idx]
+                result.extend([y_lower, y_upper])
+                col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
+        self.conformalized_sample_predictions = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.sampled_forecasts = pd.DataFrame(sampled_predictions, columns=[f'h_{i+1}' for i in range(self.H)])
+        # generate quantiles from sampled predictions
+        return self.conformalized_sample_predictions
 
 class ets_conformalizer():
     """
@@ -633,143 +885,6 @@ class bidirect_ts_conformalizer():
             CPs.rename(columns = {i+1:"lower_"+str(round(self.delta[d_index]*100)), i+2:"upper_"+str(round(self.delta[d_index]*100))}, inplace = True)
         return CPs
     
-class var_conformalizer():
-    def __init__(self, model_fit, delta, n_windows, H, col_index, calib_metric = "mae", non_stationary_series = None):
-        self.delta = delta
-        self.lag_order = model_fit.k_ar
-        self.y_train = model_fit.endog
-        self.x_train = model_fit.exog
-        self.n_windows = n_windows
-        self.n_calib = n_windows
-        self.H = H
-        self.col = col_index
-        self.origin = non_stationary_series
-        self.calib_metric = calib_metric
-        self.model_fit = VAR(self.y_train, exog=self.x_train).fit(self.lag_order)
-        self.calibrate()
-    def backtest(self):
-        #making H-step-ahead forecast n_windows times for each 1-step backward sliding window.
-        # We can the think of n_windows as the size of calibration set for each H horizon 
-        actuals = []
-        predictions = []
-        for i in range(self.n_windows):
-            y_back = self.y_train[:-self.H-i]
-            if self.x_train is not None:
-                x_back = self.x_train[:-self.H-i]
-            else:
-                x_back = None
-            if i !=0:
-                if self.origin is not None:
-                    test_y = np.array(self.origin)[-self.H-i:-i]
-                    last_train = np.array(self.origin)[:-self.H-i][-1]
-                else:
-                    test_y = self.y_train[-self.H-i:-i][:, self.col]
-                if self.x_train is not None:
-                    test_x = self.x_train[-self.H-i:-i]
-                else:
-                    test_x = None
-            else:
-                if self.origin is not None:
-                    test_y = np.array(self.origin)[-self.H:]
-                    last_train = np.array(self.origin)[:-self.H-i][-1]
-                else:
-                    test_y = self.y_train[-self.H:][:, self.col]
-                if self.x_train is not None:
-                    test_x = self.x_train[-self.H:]
-                else:
-                    test_x = None
-                
-            var_result = VAR(y_back, exog=x_back).fit(self.lag_order)
-            y_pred = var_result.forecast(y = y_back[-self.lag_order:], steps = self.H, exog_future = test_x)[:, self.col]
-            
-            if self.origin is not None:
-                pred_dif = np.insert(y_pred, 0, last_train)
-                pred_var = np.cumsum(pred_dif)[-self.H:]
-            else:
-                pred_var = y_pred
-            predictions.append(pred_var)
-            actuals.append(test_y)
-            print("model "+str(i+1)+" is completed")
-        return np.row_stack(actuals), np.row_stack(predictions)
-    
-    def calculate_qunatile(self, scores_calib):
-        # Calculate the quantile values for each delta value
-        delta_q = []
-        for i in self.delta:
-            which_quantile = np.ceil((i)*(self.n_calib+1))/self.n_calib
-            q_data = np.quantile(scores_calib, which_quantile, method = "lower")
-            delta_q.append(q_data)
-        self.delta_q = delta_q
-        return delta_q
-    
-    def non_conformity_func(self):
-        #Calculate non-conformity scores (mae, smape and mape for now) for each forecasted horizon
-        acts, preds = self.backtest()
-        horizon_scores = []
-        dists = []
-        for i in range(self.H):
-            mae =np.abs(acts[:,i] - preds[:,i])
-            smape = 2*mae/(np.abs(acts[:,i])+np.abs(preds[:,i]))
-            mape = mae/acts[:,i]
-            metrics = np.stack((smape,  mape, mae), axis=1)
-            horizon_scores.append(metrics)
-            dist = 2*acts[:,i] - preds[:,i]
-            dists.append(dist)
-        self.cp_dist = np.stack(dists).T
-        return horizon_scores
-    
-    
-    def calibrate(self):
-         # Calibrate the conformalizer to calculate q_hat for all given delta values
-        scores_calib = self.non_conformity_func()
-        self.q_hat_D = []
-        for d in range(len(self.delta)):
-            q_hat_H = []
-            for i in range(self.H):
-                scores_i = scores_calib[i]
-                if self.calib_metric == "smape":
-                    qhat = self.calculate_qunatile(scores_i[:, 0])[d]
-                elif self.calib_metric == "mape":
-                    qhat = self.calculate_qunatile(scores_i[:, 1])[d]
-                elif self.calib_metric == "mae":
-                    q_hat = self.calculate_qunatile(scores_i[:, 2])[d]
-                else:
-                    raise ValueError("not a valid metric")
-                q_hat_H.append(q_hat)
-            self.q_hat_D.append(q_hat_H)
-            
-    def forecast(self, X = None):
-        fore_var = self.model_fit.forecast(y = self.y_train[-self.lag_order:], steps = self.H, exog_future = X)[:, self.col]
-        if self.origin is not None:
-            last_origin = np.array(self.origin)[-1]
-            add_orig = np.insert(fore_var, 0, last_origin)
-            y_pred = np.cumsum(add_orig)[-self.H:]
-        else:
-            y_pred = fore_var
-
-        result = []
-        result.append(y_pred)
-        #Calculate the prediction intervals given the calibration metric used for non-conformity score
-        for i in range(len(self.delta)):
-            if self.calib_metric == "mae":
-                y_lower, y_upper = y_pred - np.array(self.q_hat_D[i]).flatten(), y_pred + np.array(self.q_hat_D[i]).flatten()
-            elif self.calib_metric == "mape":
-                y_lower, y_upper = y_pred/(1+np.array(self.q_hat_D[i]).flatten()), y_pred/(1-np.array(self.q_hat_D[i]).flatten())
-            elif self.calib_metric == "smape":
-                y_lower = y_pred*(2-np.array(self.q_hat_D[i]).flatten())/(2+np.array(self.q_hat_D[i]).flatten())
-                y_upper = y_pred*(2+np.array(self.q_hat_D[i]).flatten())/(2-np.array(self.q_hat_D[i]).flatten())
-            else:
-                raise ValueError("not a valid metric")
-            result.append(y_lower)
-            result.append(y_upper)
-        CPs = pd.DataFrame(result).T
-        CPs.rename(columns = {0:"point_forecast"}, inplace = True)
-        for i in range(0, 2*len(self.delta), 2):
-            d_index = round(i/2)
-            CPs.rename(columns = {i+1:"lower_"+str(round(self.delta[d_index]*100)), i+2:"upper_"+str(round(self.delta[d_index]*100))}, inplace = True)
-        return CPs
-    
-
 class bag_boost_aggr_conformalizer():
     def __init__(self, delta, train_df, n_windows, models, cat_cols, H, calib_metric = "mae", model_param=None):
         self.delta = delta
@@ -1466,125 +1581,6 @@ class var_aggr_conformalizer():
                 y_pred += np.cumsum(add_orig)[-self.H:]
             else:
                 y_pred += fore_var
-
-        result = []
-        result.append(y_pred)
-        #Calculate the prediction intervals given the calibration metric used for non-conformity score
-        for i in range(len(self.delta)):
-            if self.calib_metric == "mae":
-                y_lower, y_upper = y_pred - np.array(self.q_hat_D[i]).flatten(), y_pred + np.array(self.q_hat_D[i]).flatten()
-            elif self.calib_metric == "mape":
-                y_lower, y_upper = y_pred/(1+np.array(self.q_hat_D[i]).flatten()), y_pred/(1-np.array(self.q_hat_D[i]).flatten())
-            elif self.calib_metric == "smape":
-                y_lower = y_pred*(2-np.array(self.q_hat_D[i]).flatten())/(2+np.array(self.q_hat_D[i]).flatten())
-                y_upper = y_pred*(2+np.array(self.q_hat_D[i]).flatten())/(2-np.array(self.q_hat_D[i]).flatten())
-            else:
-                raise ValueError("not a valid metric")
-            result.append(y_lower)
-            result.append(y_upper)
-        CPs = pd.DataFrame(result).T
-        CPs.rename(columns = {0:"point_forecast"}, inplace = True)
-        for i in range(0, 2*len(self.delta), 2):
-            d_index = round(i/2)
-            CPs.rename(columns = {i+1:"lower_"+str(round(self.delta[d_index]*100)), i+2:"upper_"+str(round(self.delta[d_index]*100))}, inplace = True)
-        return CPs
-    
-class hmm_var_conformalizer():
-    def __init__(self, model, col_idx, delta, n_windows, H, calib_metric = "mae"):
-        self.delta = delta
-        self.model = model
-        self.data = model.data
-        self.idx = col_idx
-        self.model_orj = model
-        self.model_orj.fit(self.data)
-        # self.y_train = model.endog.flatten()
-        # self.x_train = model.exog
-        self.target_col = model.target_col
-        self.n_windows = n_windows
-        self.n_calib = n_windows
-        self.H = H
-        self.calib_metric = calib_metric
-        # self.model_fit = self.model(self.y_train, order= self.order, exog = self.x_train, seasonal_order= self.S_order).fit()
-        self.calibrate()
-    def backtest(self):
-        #making H-step-ahead forecast n_windows times for each 1-step backward sliding window.
-        # We can the think of n_windows as the size of calibration set for each H horizon 
-        actuals = []
-        predictions = []
-        for i in range(self.n_windows):
-            train = self.data[:-self.H-i]
-
-            if i !=0:
-                test_y = self.data[-self.H-i:-i][self.target_col[self.idx]].values
-                if self.data.shape[1]>2:
-                    test_x = self.data[-self.H-i:-i].drop(columns = self.target_col)
-                else:
-                    test_x = None
-            else:
-                test_y = self.data[-self.H:][self.target_col[self.idx]].values
-                if self.data.shape[1]>2:
-                    test_x = self.data[-self.H:].drop(columns = self.target_col)
-                else:
-                    test_x = None
-
-            self.model.fit(train)
-            y_pred = self.model.forecast(len(test_y), test_x)[self.target_col[self.idx]]
-
-            predictions.append(y_pred)
-            actuals.append(test_y)
-            print("model "+str(i+1)+" is completed")
-        self.predictions = np.row_stack(predictions)
-        self.actuals = np.row_stack(actuals)
-        return np.row_stack(actuals), np.row_stack(predictions)
-    
-    def calculate_qunatile(self, scores_calib):
-        # Calculate the quantile values for each delta value
-        delta_q = []
-        for i in self.delta:
-            which_quantile = np.ceil((i)*(self.n_calib+1))/self.n_calib
-            q_data = np.quantile(scores_calib, which_quantile, method = "lower")
-            delta_q.append(q_data)
-        self.delta_q = delta_q
-        return delta_q
-    
-    def non_conformity_func(self):
-        #Calculate non-conformity scores (mae, smape and mape for now) for each forecasted horizon
-        acts, preds = self.backtest()
-        horizon_scores = []
-        dists = []
-        for i in range(self.H):
-            mae =np.abs(acts[:,i] - preds[:,i])
-            smape = 2*mae/(np.abs(acts[:,i])+np.abs(preds[:,i]))
-            mape = mae/acts[:,i]
-            metrics = np.stack((smape,  mape, mae), axis=1)
-            horizon_scores.append(metrics)
-            dist = 2*acts[:,i] - preds[:,i]
-            dists.append(dist)
-        self.cp_dist = np.stack(dists).T
-        return horizon_scores
-    
-    
-    def calibrate(self):
-         # Calibrate the conformalizer to calculate q_hat for all given delta values
-        scores_calib = self.non_conformity_func()
-        self.q_hat_D = []
-        for d in range(len(self.delta)):
-            q_hat_H = []
-            for i in range(self.H):
-                scores_i = scores_calib[i]
-                if self.calib_metric == "smape":
-                    q_hat = self.calculate_qunatile(scores_i[:, 0])[d]
-                elif self.calib_metric == "mape":
-                    q_hat = self.calculate_qunatile(scores_i[:, 1])[d]
-                elif self.calib_metric == "mae":
-                    q_hat = self.calculate_qunatile(scores_i[:, 2])[d]
-                else:
-                    raise ValueError("not a valid metric")
-                q_hat_H.append(q_hat)
-            self.q_hat_D.append(q_hat_H)
-            
-    def forecast(self, X = None):
-        y_pred = self.model_orj.forecast(self.H, exog = X)[self.target_col[self.idx]]
 
         result = []
         result.append(y_pred)
