@@ -92,6 +92,7 @@ class ml_conformalizer():
         # distributions for each horizons. So add y_forecast array to each columns of self.resid and equal to self.dist
         dist = y_forecast[:, None] + self.resid
         self.dist = pd.DataFrame(dist.T, columns=[f'h_{i+1}' for i in range(self.H)])
+        self.dist = self.dist.clip(lower=0.1)
         return pd.DataFrame(np.column_stack(result), columns=col_names)
 
     def sample_predictions(self, samples=1000, df=None, future_exog=None):
@@ -218,6 +219,7 @@ class var_conformalizer():
         # distributions for each horizons. So add y_forecast array to each columns of self.resid and equal to self.dist
         dist = y_forecast[:, None] + self.resid
         self.dist = pd.DataFrame(dist.T, columns=[f'h_{i+1}' for i in range(self.H)])
+        self.dist = self.dist.clip(lower=0.1)
         return pd.DataFrame(np.column_stack(result), columns=col_names)
 
     def sample_predictions(self, df, samples=1000, future_exog=None):
@@ -344,6 +346,7 @@ class hmm_conformalizer():
         # distributions for each horizons. So add y_forecast array to each columns of self.resid and equal to self.dist
         dist = y_forecast[:, None] + self.resid
         self.dist = pd.DataFrame(dist.T, columns=[f'h_{i+1}' for i in range(self.H)])
+        self.dist = self.dist.clip(lower=0.1)
         return pd.DataFrame(np.column_stack(result), columns=col_names)
 
     def sample_predictions(self, samples=1000, df=None, future_exog=None):
@@ -471,6 +474,7 @@ class hmm_var_conformalizer():
         # distributions for each horizons. So add y_forecast array to each columns of self.resid and equal to self.dist
         dist = y_forecast[:, None] + self.resid
         self.dist = pd.DataFrame(dist.T, columns=[f'h_{i+1}' for i in range(self.H)])
+        self.dist = self.dist.clip(lower=0.1)
         return pd.DataFrame(np.column_stack(result), columns=col_names)
 
     def sample_predictions(self, samples=1000, df=None, future_exog=None):
@@ -593,6 +597,7 @@ class ets_conformalizer():
         # distributions for each horizons. So add y_forecast array to each columns of self.resid and equal to self.dist
         dist = y_forecast[:, None] + self.resid
         self.dist = pd.DataFrame(dist.T, columns=[f'h_{i+1}' for i in range(self.H)])
+        self.dist = self.dist.clip(lower=0.1)
         return pd.DataFrame(np.column_stack(result), columns=col_names)
 
     def sample_predictions(self, series, samples=1000):
@@ -719,6 +724,7 @@ class arima_conformalizer():
         # distributions for each horizons. So add y_forecast array to each columns of self.resid and equal to self.dist
         dist = y_forecast[:, None] + self.resid
         self.dist = pd.DataFrame(dist.T, columns=[f'h_{i+1}' for i in range(self.H)])
+        self.dist = self.dist.clip(lower=0.1)
         return pd.DataFrame(np.column_stack(result), columns=col_names)
 
     def sample_predictions(self, samples=1000, df=None, future_exog=None):
