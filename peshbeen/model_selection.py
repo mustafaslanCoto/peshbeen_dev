@@ -1854,11 +1854,11 @@ def cv_tune(
     def _set_model_params(params):
         # Handle special model parameters that are not passed to model constructor
         # and must be set directly on the forecasting model object
-        if "n_lag" in params:
-            if isinstance(params["n_lag"], int):
-                model.n_lag = list(range(1, params["n_lag"] + 1))
-            elif isinstance(params["n_lag"], list):
-                model.n_lag = params["n_lag"]
+        if "lags" in params:
+            if isinstance(params["lags"], int):
+                model.n_lag = list(range(1, params["lags"] + 1))
+            elif isinstance(params["lags"], list):
+                model.n_lag = params["lags"]
         if "box_cox" in params:
             model.box_cox = params["box_cox"]
         if "box_cox_lmda" in params:
