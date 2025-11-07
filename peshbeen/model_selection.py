@@ -1912,8 +1912,9 @@ def cv_tune(
             model.lag_transform = selected_transforms
 
                 # Optional: penalize too few lags
-        if len(selected_lags) < 1:
-            return {"loss": 1e6, "status": STATUS_OK}
+        if lag_space is not None:
+            if len(selected_lags) < 1:
+                return {"loss": 1e6, "status": STATUS_OK}
 
         metrics = []
         for train_index, test_index in tscv.split(df):
