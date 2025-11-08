@@ -62,6 +62,38 @@ def get_conformal_quantiles(non_conform, n_calib, quantiles, y_forecast):
     
     return pd.DataFrame(np.concatenate((y_forecast[None, :], y_quantile), axis=0).T, columns=q_columns)
 
+def get_bootstrap_quantiles(samples, n_calib, quantiles, y_forecast):
+    """
+    Generate bootstrap quantiles for future time steps.
+    Args:
+        samples: bootstrap samples from the predictive distribution
+        n_calib: number of calibration samples
+        quantiles (float or list): Quantiles to be calculated (e.g., 0.1, 0.5, 0.9).
+        y_forecast: point forecasts
+    Returns:
+        pd.DataFrame: DataFrame containing point forecasts and conformal quantiles.
+    """
+    if isinstance(quantiles, float):
+        q_which =np.ceil(quantiles * (n_calib + 1)) / n_calib 
+        quantile_ = np.quantile(samples, q_which, method="higher", axis=1)
+        y_quantile = quantile_[None, :]
+    elif isinstance(quantiles, list):
+        y_quantile = []
+        for quantile in quantiles:
+            q_which = np.ceil(quantile * (n_calib + 1)) / n_calib # conformal quantile
+            quantile_ = np.quantile(samples, q_which, method="lower", axis=1)
+            y_quantile.append(quantile_)
+        y_quantile = np.array(y_quantile)
+    
+    if isinstance(quantiles, float):
+        q_columns = ["point_forecast"]+[f'q_{int(quantiles*100)}']
+    elif isinstance(quantiles, list):
+        q_columns = ["point_forecast"]+[f'q_{int(quantile*100)}' for quantile in quantiles]
+    else:
+        raise ValueError("quantiles must be float or list of floats.")
+    
+    return pd.DataFrame(np.concatenate((y_forecast[None, :], y_quantile), axis=0).T, columns=q_columns)
+
 class ml_prob_forecasts():
     """
     Probabilistic forecasting for ML models. It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
@@ -211,10 +243,26 @@ class ml_prob_forecasts():
             for idx, d in enumerate(self.delta):
                 result.extend([lower_bound[idx], upper_bound[idx]])
                 col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
-        bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.y_forecast_b = y_forecast
 
-        return bootstrap_forecasts_df
-    
+    def bootstrap_quantiles(self, quantiles, bootstrap_method='bootstrap'):
+        """
+        Generate bootstrap quantiles for future time steps.
+        Args:
+            quantiles (float or list): Quantiles to be calculated (e.g., 0.1, 0.5, 0.9).
+            bootstrap_method (str): The method to use for bootstrapping or simulated correlated_forecasts ('bootstrap' or 'correlated').
+        """
+        ## Make sure bootstrap() method is called before calling this method
+        if bootstrap_method == 'bootstrap':
+            if (not hasattr(self, 'bootstrap')):
+                raise RuntimeError("Bootstrap samples not available. Run .bootstrap(df) first.")
+            return get_bootstrap_quantiles(self.bootstrap_forecasts, self.n_calib, quantiles, self.y_forecast_b)
+        elif bootstrap_method == 'correlated':
+            if (not hasattr(self, 'simulate_correlated_forecasts')):
+                raise RuntimeError("Correlated forecast samples not available. Run .simulate_correlated_forecasts(df) first.")
+            return get_bootstrap_quantiles(self.w_samples.T, self.n_calib, quantiles, self.y_forecast_c)
+
     def simulate_correlated_forecasts(self, df, samples=1000, future_exog=None):
         """
         Simulate correlated errors to generate forecasts
@@ -262,9 +310,9 @@ class ml_prob_forecasts():
             for idx, d in enumerate(self.delta):
                 result.extend([lower_bound[idx], upper_bound[idx]])
                 col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
-        correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
-
-        return correlated_forecasts_df
+        self.correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.y_forecast_c = y_forecast
+        self.w_samples = w_samples
 
 class var_prob_forecasts():
     """
@@ -447,9 +495,25 @@ class var_prob_forecasts():
             for idx, d in enumerate(self.delta):
                 result.extend([lower_bound[idx], upper_bound[idx]])
                 col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
-        bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.y_forecast_b = y_forecast
 
-        return bootstrap_forecasts_df
+    def bootstrap_quantiles(self, quantiles, bootstrap_method='bootstrap'):
+        """
+        Generate bootstrap quantiles for future time steps.
+        Args:
+            quantiles (float or list): Quantiles to be calculated (e.g., 0.1, 0.5, 0.9).
+            bootstrap_method (str): The method to use for bootstrapping or simulated correlated_forecasts ('bootstrap' or 'correlated').
+        """
+        ## Make sure bootstrap() method is called before calling this method
+        if bootstrap_method == 'bootstrap':
+            if (not hasattr(self, 'bootstrap')):
+                raise RuntimeError("Bootstrap samples not available. Run .bootstrap(df) first.")
+            return get_bootstrap_quantiles(self.bootstrap_forecasts, self.n_calib, quantiles, self.y_forecast_b)
+        elif bootstrap_method == 'correlated':
+            if (not hasattr(self, 'simulate_correlated_forecasts')):
+                raise RuntimeError("Correlated forecast samples not available. Run .simulate_correlated_forecasts(df) first.")
+            return get_bootstrap_quantiles(self.w_samples.T, self.n_calib, quantiles, self.y_forecast_c)
     
     def simulate_correlated_forecasts(self, df, samples=1000, future_exog=None):
         """
@@ -498,9 +562,9 @@ class var_prob_forecasts():
             for idx, d in enumerate(self.delta):
                 result.extend([lower_bound[idx], upper_bound[idx]])
                 col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
-        correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
-
-        return correlated_forecasts_df
+        self.correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.y_forecast_c = y_forecast
+        self.w_samples = w_samples
     
 class hmm_prob_forecasts():
     """
@@ -653,9 +717,25 @@ class hmm_prob_forecasts():
             for idx, d in enumerate(self.delta):
                 result.extend([lower_bound[idx], upper_bound[idx]])
                 col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
-        bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.y_forecast_b = y_forecast
 
-        return bootstrap_forecasts_df
+    def bootstrap_quantiles(self, quantiles, bootstrap_method='bootstrap'):
+        """
+        Generate bootstrap quantiles for future time steps.
+        Args:
+            quantiles (float or list): Quantiles to be calculated (e.g., 0.1, 0.5, 0.9).
+            bootstrap_method (str): The method to use for bootstrapping or simulated correlated_forecasts ('bootstrap' or 'correlated').
+        """
+        ## Make sure bootstrap() method is called before calling this method
+        if bootstrap_method == 'bootstrap':
+            if (not hasattr(self, 'bootstrap')):
+                raise RuntimeError("Bootstrap samples not available. Run .bootstrap(df) first.")
+            return get_bootstrap_quantiles(self.bootstrap_forecasts, self.n_calib, quantiles, self.y_forecast_b)
+        elif bootstrap_method == 'correlated':
+            if (not hasattr(self, 'simulate_correlated_forecasts')):
+                raise RuntimeError("Correlated forecast samples not available. Run .simulate_correlated_forecasts(df) first.")
+            return get_bootstrap_quantiles(self.w_samples.T, self.n_calib, quantiles, self.y_forecast_c)
     
     def simulate_correlated_forecasts(self, df, samples=1000, future_exog=None):
         """
@@ -704,9 +784,9 @@ class hmm_prob_forecasts():
             for idx, d in enumerate(self.delta):
                 result.extend([lower_bound[idx], upper_bound[idx]])
                 col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
-        correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
-
-        return correlated_forecasts_df
+        self.correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.y_forecast_c = y_forecast
+        self.w_samples = w_samples
 
 class hmm_var_prob_forecasts():
     """
@@ -860,9 +940,25 @@ class hmm_var_prob_forecasts():
             for idx, d in enumerate(self.delta):
                 result.extend([lower_bound[idx], upper_bound[idx]])
                 col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
-        bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.y_forecast_b = y_forecast
 
-        return bootstrap_forecasts_df
+    def bootstrap_quantiles(self, quantiles, bootstrap_method='bootstrap'):
+        """
+        Generate bootstrap quantiles for future time steps.
+        Args:
+            quantiles (float or list): Quantiles to be calculated (e.g., 0.1, 0.5, 0.9).
+            bootstrap_method (str): The method to use for bootstrapping or simulated correlated_forecasts ('bootstrap' or 'correlated').
+        """
+        ## Make sure bootstrap() method is called before calling this method
+        if bootstrap_method == 'bootstrap':
+            if (not hasattr(self, 'bootstrap')):
+                raise RuntimeError("Bootstrap samples not available. Run .bootstrap(df) first.")
+            return get_bootstrap_quantiles(self.bootstrap_forecasts, self.n_calib, quantiles, self.y_forecast_b)
+        elif bootstrap_method == 'correlated':
+            if (not hasattr(self, 'simulate_correlated_forecasts')):
+                raise RuntimeError("Correlated forecast samples not available. Run .simulate_correlated_forecasts(df) first.")
+            return get_bootstrap_quantiles(self.w_samples.T, self.n_calib, quantiles, self.y_forecast_c)
     
     def simulate_correlated_forecasts(self, df, samples=1000, future_exog=None):
         """
@@ -886,8 +982,8 @@ class hmm_var_prob_forecasts():
         sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
 
         samples = np.random.multivariate_normal(mu, sigma_, size=samples)
-        w_samples = samples + y_forecast
-        self.correlated_forecasts = pd.DataFrame(w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
+        self.w_samples = samples + y_forecast
+        self.correlated_forecasts = pd.DataFrame(self.w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
         # Generate conformal prediction intervals using sampled residuals
         if isinstance(self.delta, float):
             low = (1-self.delta)/2
@@ -898,8 +994,8 @@ class hmm_var_prob_forecasts():
         else:
             raise ValueError("delta must be float or list of floats.")
 
-        lower_bound = np.quantile(w_samples, low, method="lower", axis=0)
-        upper_bound = np.quantile(w_samples, high, method="higher", axis=0)
+        lower_bound = np.quantile(self.w_samples, low, method="lower", axis=0)
+        upper_bound = np.quantile(self.w_samples, high, method="higher", axis=0)
 
         result = [y_forecast]
         col_names = ["point_forecast"]
@@ -911,9 +1007,8 @@ class hmm_var_prob_forecasts():
             for idx, d in enumerate(self.delta):
                 result.extend([lower_bound[idx], upper_bound[idx]])
                 col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
-        correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
-
-        return correlated_forecasts_df
+        self.correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.y_forecast_c = y_forecast
 
 class ets_prob_forecasts():
     """
@@ -1058,9 +1153,25 @@ class ets_prob_forecasts():
             for idx, d in enumerate(self.delta):
                 result.extend([lower_bound[idx], upper_bound[idx]])
                 col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
-        bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.y_forecast_b = y_forecast
 
-        return bootstrap_forecasts_df
+    def bootstrap_quantiles(self, quantiles, bootstrap_method='bootstrap'):
+        """
+        Generate bootstrap quantiles for future time steps.
+        Args:
+            quantiles (float or list): Quantiles to be calculated (e.g., 0.1, 0.5, 0.9).
+            bootstrap_method (str): The method to use for bootstrapping or simulated correlated_forecasts ('bootstrap' or 'correlated').
+        """
+        ## Make sure bootstrap() method is called before calling this method
+        if bootstrap_method == 'bootstrap':
+            if (not hasattr(self, 'bootstrap')):
+                raise RuntimeError("Bootstrap samples not available. Run .bootstrap(df) first.")
+            return get_bootstrap_quantiles(self.bootstrap_forecasts, self.n_calib, quantiles, self.y_forecast_b)
+        elif bootstrap_method == 'correlated':
+            if (not hasattr(self, 'simulate_correlated_forecasts')):
+                raise RuntimeError("Correlated forecast samples not available. Run .simulate_correlated_forecasts(df) first.")
+            return get_bootstrap_quantiles(self.w_samples.T, self.n_calib, quantiles, self.y_forecast_c)
 
     def simulate_correlated_forecasts(self, series, samples=1000):
         """
@@ -1083,8 +1194,8 @@ class ets_prob_forecasts():
         sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
 
         samples = np.random.multivariate_normal(mu, sigma_, size=samples)
-        w_samples = samples + y_forecast
-        self.correlated_forecasts = pd.DataFrame(w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
+        self.w_samples = samples + y_forecast
+        self.correlated_forecasts = pd.DataFrame(self.w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
         # Generate conformal prediction intervals using sampled residuals
         if isinstance(self.delta, float):
             low = (1-self.delta)/2
@@ -1095,8 +1206,8 @@ class ets_prob_forecasts():
         else:
             raise ValueError("delta must be float or list of floats.")
 
-        lower_bound = np.quantile(w_samples, low, method="lower", axis=0)
-        upper_bound = np.quantile(w_samples, high, method="higher", axis=0)
+        lower_bound = np.quantile(self.w_samples, low, method="lower", axis=0)
+        upper_bound = np.quantile(self.w_samples, high, method="higher", axis=0)
 
         result = [y_forecast]
         col_names = ["point_forecast"]
@@ -1108,9 +1219,8 @@ class ets_prob_forecasts():
             for idx, d in enumerate(self.delta):
                 result.extend([lower_bound[idx], upper_bound[idx]])
                 col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
-        correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
-
-        return correlated_forecasts_df
+        self.correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.y_forecast_c = y_forecast
     
 class arima_prob_forecasts():
     """
@@ -1267,10 +1377,26 @@ class arima_prob_forecasts():
             for idx, d in enumerate(self.delta):
                 result.extend([lower_bound[idx], upper_bound[idx]])
                 col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
-        bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.bootstrap_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.y_forecast_b = y_forecast
 
-        return bootstrap_forecasts_df
-    
+    def bootstrap_quantiles(self, quantiles, bootstrap_method='bootstrap'):
+        """
+        Generate bootstrap quantiles for future time steps.
+        Args:
+            quantiles (float or list): Quantiles to be calculated (e.g., 0.1, 0.5, 0.9).
+            bootstrap_method (str): The method to use for bootstrapping or simulated correlated_forecasts ('bootstrap' or 'correlated').
+        """
+        ## Make sure bootstrap() method is called before calling this method
+        if bootstrap_method == 'bootstrap':
+            if (not hasattr(self, 'bootstrap')):
+                raise RuntimeError("Bootstrap samples not available. Run .bootstrap(df) first.")
+            return get_bootstrap_quantiles(self.bootstrap_forecasts, self.n_calib, quantiles, self.y_forecast_b)
+        elif bootstrap_method == 'correlated':
+            if (not hasattr(self, 'simulate_correlated_forecasts')):
+                raise RuntimeError("Correlated forecast samples not available. Run .simulate_correlated_forecasts(df) first.")
+            return get_bootstrap_quantiles(self.w_samples.T, self.n_calib, quantiles, self.y_forecast_c)
+
     def simulate_correlated_forecasts(self, df, samples=1000, future_exog=None):
         """
         Simulate correlated errors to generate forecasts
@@ -1295,8 +1421,8 @@ class arima_prob_forecasts():
         sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
 
         samples = np.random.multivariate_normal(mu, sigma_, size=samples)
-        w_samples = samples + y_forecast
-        self.correlated_forecasts = pd.DataFrame(w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
+        self.w_samples = samples + y_forecast
+        self.correlated_forecasts = pd.DataFrame(self.w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
         # Generate conformal prediction intervals using sampled residuals
         if isinstance(self.delta, float):
             low = (1-self.delta)/2
@@ -1307,8 +1433,8 @@ class arima_prob_forecasts():
         else:
             raise ValueError("delta must be float or list of floats.")
 
-        lower_bound = np.quantile(w_samples, low, method="lower", axis=0)
-        upper_bound = np.quantile(w_samples, high, method="higher", axis=0)
+        lower_bound = np.quantile(self.w_samples, low, method="lower", axis=0)
+        upper_bound = np.quantile(self.w_samples, high, method="higher", axis=0)
 
         result = [y_forecast]
         col_names = ["point_forecast"]
@@ -1320,9 +1446,8 @@ class arima_prob_forecasts():
             for idx, d in enumerate(self.delta):
                 result.extend([lower_bound[idx], upper_bound[idx]])
                 col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
-        correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
-
-        return correlated_forecasts_df
+        self.correlated_forecasts_df = pd.DataFrame(np.column_stack(result), columns=col_names)
+        self.y_forecast_c = y_forecast
     
 class bidirect_ts_conformalizer():
     def __init__(self, delta, train_df, col_index, n_windows, model, H, calib_metric = "mae", model_param=None):
