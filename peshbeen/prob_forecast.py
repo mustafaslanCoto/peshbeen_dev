@@ -144,7 +144,7 @@ class ml_prob_forecasts():
             raise ValueError("delta must be float or list of floats.")
     
     
-    def calibrate(self, df, delta):
+    def calibrate(self, df, delta = 0.5):
         """
         Calibrate the conformal model using the calibration dataset.
         Args:
@@ -344,7 +344,7 @@ class var_prob_forecasts():
             raise ValueError("delta must be float or list of floats.")
     
     
-    def calibrate(self, df, delta):
+    def calibrate(self, df, delta = 0.5):
         """
         Calibrate the conformal model using the calibration dataset.
         Args:
@@ -542,7 +542,7 @@ class hmm_prob_forecasts():
             raise ValueError("delta must be float or list of floats.")
     
     
-    def calibrate(self, df, delta):
+    def calibrate(self, df, delta = 0.5):
         """
         Calibrate the conformal model using the calibration dataset.
         Args:
@@ -740,7 +740,7 @@ class hmm_var_prob_forecasts():
             raise ValueError("delta must be float or list of floats.")
     
     
-    def calibrate(self, df, delta):
+    def calibrate(self, df, delta = 0.5):
         """
         Calibrate the conformal model using the calibration dataset.
         Args:
@@ -935,7 +935,7 @@ class ets_prob_forecasts():
         else:
             raise ValueError("delta must be float or list of floats.")
     
-    def calibrate(self, series, delta):
+    def calibrate(self, series, delta = 0.5):
         """
         Calibrate the conformal model using the calibration dataset.
         Args:
@@ -1130,7 +1130,7 @@ class arima_prob_forecasts():
         else:
             raise ValueError("delta must be float or list of floats.")
     
-    def calibrate(self, df, target_col, delta):
+    def calibrate(self, df, target_col, delta = 0.5):
         """
         Calibrate the conformal model using the calibration dataset.
         Args:
