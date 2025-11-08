@@ -170,7 +170,7 @@ class ml_prob_forecasts():
         else:
             y_forecast = np.array(self.model.forecast(self.H))
 
-        return get_conformal_quantiles(self.non_conform, self.model.n_calib, quantiles, y_forecast)
+        return get_conformal_quantiles(self.non_conform, self.n_calib, quantiles, y_forecast)
 
     def bootstrap(self, df, samples=1000, future_exog=None):
         """
@@ -406,7 +406,7 @@ class var_prob_forecasts():
         else:
             y_forecast = np.array(self.model.forecast(self.H)[self.tar_col])
 
-        return get_conformal_quantiles(self.non_conform, self.model.n_calib, quantiles, y_forecast)
+        return get_conformal_quantiles(self.non_conform, self.n_calib, quantiles, y_forecast)
 
     def bootstrap(self, df, samples=1000, future_exog=None):
         """
@@ -612,7 +612,7 @@ class hmm_prob_forecasts():
         else:
             y_forecast = np.array(self.model.forecast(self.H))
 
-        return get_conformal_quantiles(self.non_conform, self.model.n_calib, quantiles, y_forecast)
+        return get_conformal_quantiles(self.non_conform, self.n_calib, quantiles, y_forecast)
 
     def bootstrap(self, df, samples=1000, future_exog=None):
         """
@@ -819,7 +819,7 @@ class hmm_var_prob_forecasts():
         else:
             y_forecast = np.array(self.model.forecast(self.H)[self.tar_col])
 
-        return get_conformal_quantiles(self.non_conform, self.model.n_calib, quantiles, y_forecast)
+        return get_conformal_quantiles(self.non_conform, self.n_calib, quantiles, y_forecast)
 
     def bootstrap(self, df, samples=1000, future_exog=None):
         """
@@ -1018,7 +1018,7 @@ class ets_prob_forecasts():
                             **self.ets_param[0]).fit(**self.ets_param[1])
         y_forecast = np.array(self.model.forecast(self.H))
 
-        return get_conformal_quantiles(self.non_conform, self.model.n_calib, quantiles, y_forecast)
+        return get_conformal_quantiles(self.non_conform, self.n_calib, quantiles, y_forecast)
 
     def bootstrap(self, series, samples=1000):
         """
@@ -1224,7 +1224,7 @@ class arima_prob_forecasts():
         else:
             y_forecast = self.model.forecast(y=np.array(y_train), h=self.H, X=np.array(x_train))["mean"]
 
-        return get_conformal_quantiles(self.non_conform, self.model.n_calib, quantiles, y_forecast)
+        return get_conformal_quantiles(self.non_conform, self.n_calib, quantiles, y_forecast)
 
     def bootstrap(self, df, samples=1000, future_exog=None):
         """
