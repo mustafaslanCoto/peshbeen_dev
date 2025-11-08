@@ -6,6 +6,7 @@ from scipy.stats import gaussian_kde
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tsa.api import VAR
 import copy
+np.random.seed(42)
 
 # --------------------------------------------------------------------- 
 # Helper functions and classes for probabilistic forecasting with conformal prediction
