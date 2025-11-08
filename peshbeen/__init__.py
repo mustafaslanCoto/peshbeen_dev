@@ -18,4 +18,4 @@ from peshbeen.transformations import (fourier_terms, rolling_quantile,
                         back_box_cox_transform,undiff_ts, seasonal_diff, invert_seasonal_diff,
                         nzInterval, zeroCumulative, kfold_target_encoder, target_encoder_for_test)
 from peshbeen.metrics import (MAPE, MASE, MSE, MAE, RMSE, SMAPE, CFE, CFE_ABS, WMAPE, MASE, SMAE, SRMSE, RMSSE)
-from peshbeen.prob_forecast import (ml_prob_forecasts, var_prob_forecasts, hmm_prob_forecasts, ets_prob_forecasts, arima_prob_forecasts)
+from peshbeen.prob_forecast import (ml_prob_forecasts, var_prob_forecasts, hmm_prob_forecasts, hmm_var_prob_forecasts, ets_prob_forecasts, arima_prob_forecasts)
