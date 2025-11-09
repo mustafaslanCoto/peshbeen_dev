@@ -1868,7 +1868,7 @@ def cv_tune(
 
     def _get_model_params_for_fit(params):
         # Exclude special parameters that should not be passed to the model constructor
-        skip_keys = {"box_cox", "n_lag", "box_cox_lmda", "box_cox_biasadj"}
+        skip_keys = {"box_cox", "lags", "box_cox_lmda", "box_cox_biasadj"}
         if lag_space is not None:
             skip_keys.update([f"lag_{i}" for i in range(1, lag_space+1)])
         if transform_space is not None:
