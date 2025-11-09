@@ -2284,7 +2284,7 @@ def hmm_cross_validate(model, df, cv_split,
         y_test = np.array(test[model.target_col])
 
         # If it is first fold, fit the model
-        model_ = model.copy()
+        # model_ = model.copy()
         # if (idx == 0) and (learn_per_fold in ["first", "all"]):
         #     model_.fit_em(train)
         # # If learning per fold, learn the model on each fold
@@ -2292,10 +2292,10 @@ def hmm_cross_validate(model, df, cv_split,
         #     model_.fit_em(train)
         # # If not learning per fold, fit the model on the first fold
         # else: # learn_per_fold == "None" or learn_per_fold == "first" for remaining folds
-        model_.fit(train, n_iter=n_iter)
+        model.fit(train, n_iter=n_iter)
 
         # Forecast using the model
-        bb_forecast = model_.forecast(test_size, x_test)
+        bb_forecast = model.forecast(test_size, x_test)
         # Evaluate each metric
         for m in metrics:
             if m.__name__ in ['MASE', 'SMAE', 'SRMSE', 'RMSSE']:
@@ -2331,7 +2331,7 @@ def hmm_mv_cross_validate(model, df, cv_split,
         # y_test2 = np.array(test[model.target_cols[1]])
 
         # If it is first fold, fit the model
-        model_ = model.copy()
+        # model_ = model.copy()
         # if (idx == 0) and (learn_per_fold in ["first", "all"]):
         #     model.fit_em(train)
         # # If learning per fold, learn the model on each fold
@@ -2339,9 +2339,9 @@ def hmm_mv_cross_validate(model, df, cv_split,
         #     model.fit_em(train)
         # # If not learning per fold, fit the model on the first fold
         # else: # learn_per_fold == "None" or learn_per_fold == "first" for remaining folds
-        model_.fit(train, n_iter=n_iter)
+        model.fit(train, n_iter=n_iter)
 
-        forecasts = model_.forecast(test_size, x_test) # dictionary of forecasts for all target columns
+        forecasts = model.forecast(test_size, x_test) # dictionary of forecasts for all target columns
         for m in metrics:
             if m.__name__ in ['MASE', 'SMAE', 'SRMSE', 'RMSSE']:
                 val = [m(test[target_col], forecasts[target_col], train[target_col]) for target_col in model.target_col]
