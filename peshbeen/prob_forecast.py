@@ -6,7 +6,7 @@ from scipy.stats import gaussian_kde
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tsa.api import VAR
 import copy
-np.random.seed(42)
+rng_kde = np.random.default_rng(seed=42)
 
 # --------------------------------------------------------------------- 
 # Helper functions and classes for probabilistic forecasting with conformal prediction
@@ -237,7 +237,7 @@ class ml_prob_forecasts():
         # ✅ Create a deep copy so that we don’t overwrite self
         new_instance = copy.deepcopy(self)
         if approximate == "kde":
-            new_instance.bootstrap_forecasts = np.column_stack([[gaussian_kde(new_instance.resid[i]).resample(size=samples)+y_forecast[i]]
+            new_instance.bootstrap_forecasts = np.column_stack([[gaussian_kde(new_instance.resid[i]).resample(size=samples, seed=rng_kde)+y_forecast[i]]
                                         for i in range(new_instance.H)])[0] # H x samples
         elif approximate == "empirical":
             new_instance.bootstrap_forecasts = np.column_stack([np.random.choice(new_instance.resid[i], size=samples, replace=True)+y_forecast[i]
@@ -287,8 +287,8 @@ class ml_prob_forecasts():
 
         mu = np.mean(self.resid.T, axis=0)
         sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
-
-        samples = np.random.multivariate_normal(mu, sigma_, size=samples)
+        rng = np.random.default_rng(seed=42)
+        samples = rng.multivariate_normal(mu, sigma_, size=samples)
         self.w_samples = samples + y_forecast
         self.correlated_forecasts = pd.DataFrame(self.w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
         self.y_forecast_c = y_forecast
@@ -435,7 +435,7 @@ class var_prob_forecasts():
         # ✅ Create a deep copy so that we don’t overwrite self
         new_instance = copy.deepcopy(self)
         if approximate == "kde":
-            new_instance.bootstrap_forecasts = np.column_stack([[gaussian_kde(new_instance.resid[i]).resample(size=samples)+y_forecast[i]]
+            new_instance.bootstrap_forecasts = np.column_stack([[gaussian_kde(new_instance.resid[i]).resample(size=samples, seed=rng_kde)+y_forecast[i]]
                                         for i in range(new_instance.H)])[0] # H x samples
         elif approximate == "empirical":
             new_instance.bootstrap_forecasts = np.column_stack([np.random.choice(new_instance.resid[i], size=samples, replace=True)+y_forecast[i]
@@ -485,8 +485,8 @@ class var_prob_forecasts():
 
         mu = np.mean(self.resid.T, axis=0)
         sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
-
-        samples = np.random.multivariate_normal(mu, sigma_, size=samples)
+        rng = np.random.default_rng(seed=42)
+        samples = rng.multivariate_normal(mu, sigma_, size=samples)
         self.w_samples = samples + y_forecast
         self.correlated_forecasts = pd.DataFrame(self.w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
         self.y_forecast_c = y_forecast
@@ -632,7 +632,7 @@ class hmm_prob_forecasts():
         # ✅ Create a deep copy so that we don’t overwrite self
         new_instance = copy.deepcopy(self)
         if approximate == "kde":
-            new_instance.bootstrap_forecasts = np.column_stack([[gaussian_kde(new_instance.resid[i]).resample(size=samples)+y_forecast[i]]
+            new_instance.bootstrap_forecasts = np.column_stack([[gaussian_kde(new_instance.resid[i]).resample(size=samples, seed=rng_kde)+y_forecast[i]]
                                         for i in range(new_instance.H)])[0] # H x samples
         elif approximate == "empirical":
             new_instance.bootstrap_forecasts = np.column_stack([np.random.choice(new_instance.resid[i], size=samples, replace=True)+y_forecast[i]
@@ -683,8 +683,9 @@ class hmm_prob_forecasts():
         mu = np.mean(self.resid.T, axis=0)
         sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
 
-        samples = np.random.multivariate_normal(mu, sigma_, size=samples)
-        w_samples = samples + y_forecast
+        rng = np.random.default_rng(seed=42)
+        samples = rng.multivariate_normal(mu, sigma_, size=samples)
+        self.w_samples = samples + y_forecast
         self.correlated_forecasts = pd.DataFrame(self.w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
         self.y_forecast_c = y_forecast
         return self
@@ -830,7 +831,7 @@ class hmm_var_prob_forecasts():
         # ✅ Create a deep copy so that we don’t overwrite self
         new_instance = copy.deepcopy(self)
         if approximate == "kde":
-            new_instance.bootstrap_forecasts = np.column_stack([[gaussian_kde(new_instance.resid[i]).resample(size=samples)+y_forecast[i]]
+            new_instance.bootstrap_forecasts = np.column_stack([[gaussian_kde(new_instance.resid[i]).resample(size=samples, seed=rng_kde)+y_forecast[i]]
                                         for i in range(new_instance.H)])[0] # H x samples
         elif approximate == "empirical":
             new_instance.bootstrap_forecasts = np.column_stack([np.random.choice(new_instance.resid[i], size=samples, replace=True)+y_forecast[i]
@@ -880,8 +881,8 @@ class hmm_var_prob_forecasts():
 
         mu = np.mean(self.resid.T, axis=0)
         sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
-
-        samples = np.random.multivariate_normal(mu, sigma_, size=samples)
+        rng = np.random.default_rng(seed=42)
+        samples = rng.multivariate_normal(mu, sigma_, size=samples)
         self.w_samples = samples + y_forecast
         self.correlated_forecasts = pd.DataFrame(self.w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
         self.y_forecast_c = y_forecast
@@ -1017,24 +1018,13 @@ class ets_prob_forecasts():
         # ✅ Create a deep copy so that we don’t overwrite self
         new_instance = copy.deepcopy(self)
         if approximate == "kde":
-            new_instance.bootstrap_forecasts = np.column_stack([[gaussian_kde(new_instance.resid[i]).resample(size=samples)+y_forecast[i]]
+            new_instance.bootstrap_forecasts = np.column_stack([[gaussian_kde(new_instance.resid[i]).resample(size=samples, seed=rng_kde)+y_forecast[i]]
                                         for i in range(new_instance.H)])[0] # H x samples
         elif approximate == "empirical":
             new_instance.bootstrap_forecasts = np.column_stack([np.random.choice(new_instance.resid[i], size=samples, replace=True)+y_forecast[i]
                 for i in range(self.H)]).T
         else:
             raise ValueError("approximate must be 'kde' or 'empirical'.")
-
-        new_instance.bootstrap_forecasts_df = pd.DataFrame(new_instance.bootstrap_forecasts.T, columns=[f'h_{i+1}' for i in range(self.H)])
-        # Generate conformal prediction intervals using sampled residuals
-        if isinstance(self.delta, float):
-            low = (1-self.delta)/2
-            high = self.delta+(1-self.delta)/2
-        elif isinstance(self.delta, list):
-            low = [(1-x)/2 for x in self.delta]
-            high = [x+(1-x)/2 for x in self.delta]
-        else:
-            raise ValueError("delta must be float or list of floats.")
 
         new_instance.bootstrap_forecasts_df = pd.DataFrame(new_instance.bootstrap_forecasts.T, columns=[f'h_{i+1}' for i in range(self.H)])
         new_instance.y_forecast_b = y_forecast
@@ -1078,7 +1068,8 @@ class ets_prob_forecasts():
         mu = np.mean(self.resid.T, axis=0)
         sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
 
-        samples = np.random.multivariate_normal(mu, sigma_, size=samples)
+        rng = np.random.default_rng(seed=42)
+        samples = rng.multivariate_normal(mu, sigma_, size=samples)
         self.w_samples = samples + y_forecast
         self.correlated_forecasts = pd.DataFrame(self.w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
         self.y_forecast_c = y_forecast
@@ -1227,7 +1218,7 @@ class arima_prob_forecasts():
         # ✅ Create a deep copy so that we don’t overwrite self
         new_instance = copy.deepcopy(self)
         if approximate == "kde":
-            new_instance.bootstrap_forecasts = np.column_stack([[gaussian_kde(new_instance.resid[i]).resample(size=samples)+y_forecast[i]]
+            new_instance.bootstrap_forecasts = np.column_stack([[gaussian_kde(new_instance.resid[i]).resample(size=samples, seed=rng_kde)+y_forecast[i]]
                                         for i in range(new_instance.H)])[0] # H x samples
         elif approximate == "empirical":
             new_instance.bootstrap_forecasts = np.column_stack([np.random.choice(new_instance.resid[i], size=samples, replace=True)+y_forecast[i]
@@ -1280,7 +1271,8 @@ class arima_prob_forecasts():
         mu = np.mean(self.resid.T, axis=0)
         sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
 
-        samples = np.random.multivariate_normal(mu, sigma_, size=samples)
+        rng = np.random.default_rng(seed=42)
+        samples = rng.multivariate_normal(mu, sigma_, size=samples)
         self.w_samples = samples + y_forecast
         self.correlated_forecasts = pd.DataFrame(self.w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
         self.y_forecast_c = y_forecast
