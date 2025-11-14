@@ -261,6 +261,17 @@ class ml_forecaster:
         bic = n * np.log(rss / n) + k * np.log(n) # BIC formula: https://otexts.com/fpp3/selecting-predictors.html
         return bic
 
+    @property
+    def hqic(self):
+        if isinstance(self.model, (LinearRegression, Ridge, Lasso, ElasticNet)):
+            k = self.X.shape[1] + 1 + 1  # number of parameters: regression coeffs + intercept + variance
+        else:
+            k = self.X.shape[1] + 1  # number of parameters: regression coeffs + variance
+        n = len(self.y)  # effective number of observations
+        rss = np.sum((self.y.to_numpy() - self.model_fit.predict(self.X))**2)
+        hqic = n * np.log(rss / n) + 2 * k * np.log(np.log(n)) # HQIC formula
+        return hqic
+
     def copy(self):
         return copy.deepcopy(self)
 
@@ -649,6 +660,23 @@ class VARModel:
         det_cov = np.log(np.linalg.det(np.cov(res, rowvar=False))) # log determinant of residual covariance matrix
         bic = det_cov + total_params * np.log(n) / n # BIC formula for VAR
         return bic
+    
+    @property
+    def hqic(self):
+        res = self.y - self.predict(self.X).T
+        K = self.y.shape[1]
+
+        p_lag = list(self.n_lag.values()) # list of lags per target
+        if isinstance(p_lag[0], int): # if lags are given as integers
+            p = p_lag[0]
+        else:
+            p = len(p_lag[0])
+        q = self.X.shape[1] - p # of exogenous variables
+        total_params = (K**2) * p + K * q
+        n = self.y.shape[0]
+        det_cov = np.log(np.linalg.det(np.cov(res, rowvar=False))) # log determinant of residual covariance matrix
+        hqic = det_cov + 2 * total_params * np.log(np.log(n)) / n # HQIC formula for VAR
+        return hqic
 
     def copy(self):
         return copy.deepcopy(self)
@@ -1546,6 +1574,12 @@ class MsHmmRegression:
         
         n = self.T  # effective number of observations
         return -2 * self.LL + k * np.log(n)
+    
+    @property
+    def hqic(self):
+        k = self.N * self.X.shape[1] + self.N ** 2 + self.N - 1
+        n = self.T  # effective number of observations
+        return -2 * self.LL + 2 * k * np.log(np.log(n))
 
     def copy(self):
         return copy.deepcopy(self)
@@ -2260,6 +2294,17 @@ class MsHmmVar:
         
         n = self.T  # effective number of observations
         return -2 * self.LL + k * np.log(n)
+
+    @property
+    def hqic(self):
+        d = self.y.shape[1]  # number of dependent variables
+        r = self.X.shape[1]  # number of predictors (lags + exogenous, intercept included)
+        
+        per_regime = r * d + d * (d + 1) / 2  # regression + covariance per state
+        k = self.N * per_regime + self.N*(self.N-1) + (self.N-1)  # total params
+        
+        n = self.T  # effective number of observations
+        return -2 * self.LL + 2 * k * np.log(np.log(n))
     
     def copy(self):
         return copy.deepcopy(self)
