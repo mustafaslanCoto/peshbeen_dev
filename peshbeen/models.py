@@ -1558,26 +1558,27 @@ class MsHmmRegression:
     # AIC computation    
     @property
     def aic(self):
-        k = self.N * self.X.shape[1] + self.N ** 2 + self.N - 1 # number of parameters: regression coeffs + transition matrix + initial state probs
+        # k = self.N * self.X.shape[1] + self.N ** 2 + self.N - 1 # number of parameters: regression coeffs + transition matrix + initial state probs
+        k = self.N * self.X.shape[1] + self.N * (self.N - 1) + (self.N - 1)
         return 2 * k - 2 * self.LL
 
     @property
     def aicc(self):
-        k = self.N * self.X.shape[1] + self.N ** 2 + self.N - 1
+        k = self.N * self.X.shape[1] + self.N * (self.N - 1) + (self.N - 1)
         n = self.T  # effective number of observations
         return self.aic + (2 * k * (k + 1)) / (n - k - 1)
 
     @property
     def bic(self):
         
-        k = self.N * self.X.shape[1] + self.N ** 2 + self.N - 1
+        k = self.N * self.X.shape[1] + self.N * (self.N - 1) + (self.N - 1)
         
         n = self.T  # effective number of observations
         return -2 * self.LL + k * np.log(n)
     
     @property
     def hqic(self):
-        k = self.N * self.X.shape[1] + self.N ** 2 + self.N - 1
+        k = self.N * self.X.shape[1] + self.N * (self.N - 1) + (self.N - 1)
         n = self.T  # effective number of observations
         return -2 * self.LL + 2 * k * np.log(np.log(n))
 
