@@ -262,7 +262,7 @@ class ml_forecaster:
         return bic
 
     @property
-    def hqic(self):
+    def hqc(self):
         if isinstance(self.model, (LinearRegression, Ridge, Lasso, ElasticNet)):
             k = self.X.shape[1] + 1 + 1  # number of parameters: regression coeffs + intercept + variance
         else:
@@ -662,7 +662,7 @@ class VARModel:
         return bic
     
     @property
-    def hqic(self):
+    def hqc(self):
         res = self.y - self.predict(self.X).T
         K = self.y.shape[1]
 
@@ -1559,12 +1559,12 @@ class MsHmmRegression:
     @property
     def aic(self):
         # k = self.N * self.X.shape[1] + self.N ** 2 + self.N - 1 # number of parameters: regression coeffs + transition matrix + initial state probs
-        k = self.N * self.X.shape[1] + self.N * (self.N - 1) + (self.N - 1)
+        k = self.N * self.X.shape[1] + self.N * (self.N - 1) + (self.N - 1) # number of parameters: regression coeffs + transition matrix + initial state probs
         return 2 * k - 2 * self.LL
 
     @property
     def aicc(self):
-        k = self.N * self.X.shape[1] + self.N * (self.N - 1) + (self.N - 1)
+        k = self.N * self.X.shape[1] + self.N * (self.N - 1) + (self.N - 1) # number of parameters: regression coeffs + transition matrix + initial state probs
         n = self.T  # effective number of observations
         return self.aic + (2 * k * (k + 1)) / (n - k - 1)
 
@@ -1577,7 +1577,7 @@ class MsHmmRegression:
         return -2 * self.LL + k * np.log(n)
     
     @property
-    def hqic(self):
+    def hqc(self):
         k = self.N * self.X.shape[1] + self.N * (self.N - 1) + (self.N - 1)
         n = self.T  # effective number of observations
         return -2 * self.LL + 2 * k * np.log(np.log(n))
@@ -2297,7 +2297,7 @@ class MsHmmVar:
         return -2 * self.LL + k * np.log(n)
 
     @property
-    def hqic(self):
+    def hqc(self):
         d = self.y.shape[1]  # number of dependent variables
         r = self.X.shape[1]  # number of predictors (lags + exogenous, intercept included)
         
