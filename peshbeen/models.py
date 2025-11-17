@@ -1792,7 +1792,7 @@ class MsHmmRegression:
         # append both dictionaries
         diagn.update(regime_r2s)
         pd.DataFrame([diagn])
-        how_fit = {f"log-likelihood": round(self.loglik, 1), "AIC": round(self.AIC, 1), "BIC": round(self.BIC, 1)}
+        how_fit = {f"log-likelihood": round(self.loglik, 1), "AIC": round(self.aic, 1), "BIC": round(self.bic, 1)}
         diagn.update(how_fit)
 
         diagnosis_df = pd.DataFrame([diagn]).T
@@ -2485,7 +2485,7 @@ class MsHmmVar:
                 .applymap(lambda x: f"{x:.3f}"))
         self.tm_df = tm_df
 
-        how_fit = {f"log-likelihood": round(self.loglik, 1), "AIC": round(self.AIC, 1), "BIC": round(self.BIC, 1)}
+        how_fit = {f"log-likelihood": round(self.loglik, 1), "AIC": round(self.aic, 1), "BIC": round(self.bic, 1)}
 
         ## other information
         data_info = {"dep. Variable": self.target_col, "n_obs": len(self.y), "df_model": sum(self.coeffs.shape)}
