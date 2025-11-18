@@ -1202,6 +1202,7 @@ class MsHmmRegression:
         trans_matrix (np.ndarray or None): Initial transition matrix.
         random_state (int or None): Random seed.
         switching_var (bool): If True, allows if variance to switch between states.
+        ridge (float): Ridge regularization parameter for regression.
         verbose (bool): Print progress if True.
     """
 
@@ -1211,7 +1212,7 @@ class MsHmmRegression:
                  cat_variables=None, lag_transform=None, n_iter=100, tol=1e-6,
                  coefficients=None, stds=None, init_state=None, trans_matrix=None,
                  box_cox=False, lamda=None, box_cox_biasadj=False, season_diff=None, 
-                 random_state=None, switching_var=True, verbose=False):
+                 random_state=None, switching_var=True, ridge=1e-5, verbose=False):
         self.N = n_components
         self.target_col = target_col
         self.diff = difference
@@ -1241,6 +1242,7 @@ class MsHmmRegression:
         self.iter = n_iter
         self.tol = tol
         self.switching_var = switching_var
+        self.ridge = ridge
         self.verb = verbose
 
 
@@ -1367,7 +1369,7 @@ class MsHmmRegression:
             return dfc.dropna()
 
 
-    def compute_coeffs(self, ridge=1e-5, var_floor=1e-5, w_floor=1e-5):
+    def compute_coeffs(self, var_floor=1e-5, w_floor=1e-5):
 
         # Update regression coefficients and stds for each state
 
@@ -1392,7 +1394,7 @@ class MsHmmRegression:
             sw = np.sqrt(w)
             Xw = X * sw[:, None]
             yw = self.y * sw
-            XtX = Xw.T @ Xw + ridge*np.eye(X.shape[1])
+            XtX = Xw.T @ Xw + self.ridge*np.eye(X.shape[1])
             Xty = Xw.T @ yw
             beta_s = np.linalg.lstsq(XtX, Xty, rcond=None)[0]
             coeffs.append(beta_s)
@@ -2188,7 +2190,7 @@ class MsHmmVar:
             self.sw = sw
             Xw = X * sw[:, None]
             yw = y * sw[:, None]  # <-- THIS IS THE FIX
-            XtX = Xw.T @ Xw + ridge * np.eye(X.shape[1])
+            XtX = Xw.T @ Xw + ridge * np.eye(X.shape[1]) # regularization
             Xty = Xw.T @ yw
             beta_s = np.linalg.lstsq(XtX, Xty, rcond=None)[0]
             coeffs.append(beta_s)
