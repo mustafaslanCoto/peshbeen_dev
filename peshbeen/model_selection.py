@@ -1622,7 +1622,8 @@ def tune_sarima(y, d, D, season,p, q, P, Q, X=None):
 # ML tuning utility function
 #------------------------------------------------------------------------------
 
-def cross_validate(model, df, cv_split, test_size, metrics, step_size=None):
+def cross_validate(model, df, cv_split, test_size, metrics, step_size=1,
+                   h_split_point=None):
     """
     Run cross-validation using time series splits.
 
@@ -1632,12 +1633,17 @@ def cross_validate(model, df, cv_split, test_size, metrics, step_size=None):
         cv_split (int): Number of splits in TimeSeriesSplit.
         test_size (int): Size of test window.
         metrics (list): List of metric functions.
+        step_size (int): Step size for time series cross-validation.
+        h_split_point (int, optional): If provided, split the horizon into two parts for separate evaluation.
     
     Returns:
         pd.DataFrame: Performance metrics for CV.
     """
     tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
     metrics_dict = {m.__name__: [] for m in metrics}
+    if h_split_point is not None:
+        metrics_dict1 = {m.__name__: [] for m in metrics}
+        metrics_dict2 = {m.__name__: [] for m in metrics}
     for train_index, test_index in tscv.split(df):
         train, test = df.iloc[train_index], df.iloc[test_index]
         x_test = test.drop(columns=[model.target_col])
@@ -1651,8 +1657,30 @@ def cross_validate(model, df, cv_split, test_size, metrics, step_size=None):
             else:
                 eval_val = m(y_test, bb_forecast)
             metrics_dict[m.__name__].append(eval_val)
+        if h_split_point is not None and isinstance(h_split_point, int):
+            y_test_1, y_test_2 = y_test[:h_split_point], y_test[h_split_point:]
+            bb_forecast_1, bb_forecast_2 = bb_forecast[:h_split_point], bb_forecast[h_split_point:]
+            for m in metrics:
+                if m.__name__ in ['MASE', 'SMAE', 'SRMSE', 'RMSSE']:
+                    eval_val1 = m(y_test_1, bb_forecast_1, np.array(train[model.target_col]))
+                    eval_val2 = m(y_test_2, bb_forecast_2, np.array(train[model.target_col]))
+                else:
+                    eval_val1 = m(y_test_1, bb_forecast_1)
+                    eval_val2 = m(y_test_2, bb_forecast_2)
+                metrics_dict1[m.__name__].append(eval_val1)
+                metrics_dict2[m.__name__].append(eval_val2)
+
     overall_performance = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
-    return pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
+    overall_performance = pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
+    if h_split_point is not None and isinstance(h_split_point, int):
+        performance_1 = [[m.__name__, np.mean(metrics_dict1[m.__name__])] for m in metrics]
+        performance_2 = [[m.__name__, np.mean(metrics_dict2[m.__name__])] for m in metrics]
+        overall_performance = pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
+        perf_1_df = pd.DataFrame(performance_1).rename(columns={0: "eval_metric", 1: f"score_before_{h_split_point}"})
+        perf_2_df = pd.DataFrame(performance_2).rename(columns={0: "eval_metric", 1: f"score_after_{h_split_point}"})
+        # merge all three dataframes
+        overall_performance = overall_performance.merge(perf_1_df, on="eval_metric").merge(perf_2_df, on="eval_metric")
+    return overall_performance
 
 def var_cross_validate(
     model,
@@ -1660,8 +1688,9 @@ def var_cross_validate(
     target_col: str,
     cv_split: int,
     test_size: int,
-    step_size: None,
-    metrics: List[Callable]
+    metrics: List[Callable],
+    step_size: int = 1,
+    h_split_point: Optional[int] = None,
 ) -> pd.DataFrame:
     """
     Perform cross-validation for VAR model.
@@ -1678,10 +1707,12 @@ def var_cross_validate(
         Number of cross-validation folds.
     test_size : int
         Test size per fold.
-    step_size : int
-        Step size for rolling window. Default is None. Test size is applied
     metrics : List[Callable]
         List of metric functions.
+    step_size : int, optional
+        Step size for rolling window. Default is 1.
+    h_split_point : int, optional
+        Point to split the test set for separate evaluation. Default is None.
 
     Returns
     -------
@@ -1691,7 +1722,9 @@ def var_cross_validate(
 
     tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
     metrics_dict = {m.__name__: [] for m in metrics}
-    # cv_forecasts_df = pd.DataFrame()
+    if h_split_point is not None:
+        metrics_dict1 = {m.__name__: [] for m in metrics}
+        metrics_dict2 = {m.__name__: [] for m in metrics}
 
     for train_index, test_index in tscv.split(df):
         train, test = df.iloc[train_index], df.iloc[test_index]
@@ -1709,11 +1742,33 @@ def var_cross_validate(
             else:
                 eval_val = m(y_test, forecasts)
             metrics_dict[m.__name__].append(eval_val)
+        if h_split_point is not None and isinstance(h_split_point, int):
+            y_test_1, y_test_2 = y_test[:h_split_point], y_test[h_split_point:]
+            bb_forecast_1, bb_forecast_2 = forecasts[:h_split_point], forecasts[h_split_point:]
+            for m in metrics:
+                if m.__name__ in ['MASE', 'SMAE', 'SRMSE', 'RMSSE']:
+                    eval_val1 = m(y_test_1, bb_forecast_1, np.array(train[model.target_col]))
+                    eval_val2 = m(y_test_2, bb_forecast_2, np.array(train[model.target_col]))
+                else:
+                    eval_val1 = m(y_test_1, bb_forecast_1)
+                    eval_val2 = m(y_test_2, bb_forecast_2)
+                metrics_dict1[m.__name__].append(eval_val1)
+                metrics_dict2[m.__name__].append(eval_val2)
 
-    overall_perform = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
-    return pd.DataFrame(overall_perform, columns=["eval_metric", "score"])
+    overall_performance = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
+    overall_performance = pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
+    if h_split_point is not None and isinstance(h_split_point, int):
+        performance_1 = [[m.__name__, np.mean(metrics_dict1[m.__name__])] for m in metrics]
+        performance_2 = [[m.__name__, np.mean(metrics_dict2[m.__name__])] for m in metrics]
+        overall_performance = pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
+        perf_1_df = pd.DataFrame(performance_1).rename(columns={0: "eval_metric", 1: f"score_before_{h_split_point}"})
+        perf_2_df = pd.DataFrame(performance_2).rename(columns={0: "eval_metric", 1: f"score_after_{h_split_point}"})
+        # merge all three dataframes
+        overall_performance = overall_performance.merge(perf_1_df, on="eval_metric").merge(perf_2_df, on="eval_metric")
+    return overall_performance
 
-def arima_cross_validate(model, df, target_col, cv_split, test_size, metrics, step_size=None):
+def arima_cross_validate(model, df, target_col, cv_split, test_size, metrics,
+                         step_size=1, h_split_point=None):
     """
     Run cross-validation using time series splits.
 
@@ -1724,12 +1779,17 @@ def arima_cross_validate(model, df, target_col, cv_split, test_size, metrics, st
         cv_split (int): Number of splits in TimeSeriesSplit.
         test_size (int): Size of test window.
         metrics (list): List of metric functions.
+        step_size (int): Step size for time series cross-validation.
+        h_split_point (int, optional): If provided, split the horizon into two parts for separate evaluation.
     
     Returns:
         pd.DataFrame: Performance metrics for CV.
     """
     tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
     metrics_dict = {m.__name__: [] for m in metrics}
+    if h_split_point is not None:
+        metrics_dict1 = {m.__name__: [] for m in metrics}
+        metrics_dict2 = {m.__name__: [] for m in metrics}
     for train_index, test_index in tscv.split(df):
         train, test = df.iloc[train_index], df.iloc[test_index]
         x_test = test.drop(columns=[target_col]).to_numpy()
@@ -1743,8 +1803,30 @@ def arima_cross_validate(model, df, target_col, cv_split, test_size, metrics, st
             else:
                 eval_val = m(y_test, forecasts)
             metrics_dict[m.__name__].append(eval_val)
+        if h_split_point is not None and isinstance(h_split_point, int):
+            y_test_1, y_test_2 = y_test[:h_split_point], y_test[h_split_point:]
+            bb_forecast_1, bb_forecast_2 = forecasts[:h_split_point], forecasts[h_split_point:]
+            for m in metrics:
+                if m.__name__ in ['MASE', 'SMAE', 'SRMSE', 'RMSSE']:
+                    eval_val1 = m(y_test_1, bb_forecast_1, np.array(train[model.target_col]))
+                    eval_val2 = m(y_test_2, bb_forecast_2, np.array(train[model.target_col]))
+                else:
+                    eval_val1 = m(y_test_1, bb_forecast_1)
+                    eval_val2 = m(y_test_2, bb_forecast_2)
+                metrics_dict1[m.__name__].append(eval_val1)
+                metrics_dict2[m.__name__].append(eval_val2)
+
     overall_performance = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
-    return pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
+    overall_performance = pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
+    if h_split_point is not None and isinstance(h_split_point, int):
+        performance_1 = [[m.__name__, np.mean(metrics_dict1[m.__name__])] for m in metrics]
+        performance_2 = [[m.__name__, np.mean(metrics_dict2[m.__name__])] for m in metrics]
+        overall_performance = pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
+        perf_1_df = pd.DataFrame(performance_1).rename(columns={0: "eval_metric", 1: f"score_before_{h_split_point}"})
+        perf_2_df = pd.DataFrame(performance_2).rename(columns={0: "eval_metric", 1: f"score_after_{h_split_point}"})
+        # merge all three dataframes
+        overall_performance = overall_performance.merge(perf_1_df, on="eval_metric").merge(perf_2_df, on="eval_metric")
+    return overall_performance
 
 def mv_cross_validate(model, df, cv_split, test_size, metrics, step_size=None):
     """
@@ -2260,7 +2342,7 @@ def cv_lag_tune(
 
 def hmm_cross_validate(model, df, cv_split,
                        test_size, metrics,
-                       n_iter=1, step_size=None):
+                       n_iter=1, step_size=1, h_split_point=None):
     """
     Run cross-validation using time series splits.
 
@@ -2272,12 +2354,16 @@ def hmm_cross_validate(model, df, cv_split,
         metrics (list): List of metric functions.
         n_iter (int): Number of iterations for HMM fitting.
         step_size (int): Step size for time series cross-validation.
+        h_split_point (int, optional): If provided, split the horizon into two parts for separate evaluation.
     
     Returns:
         pd.DataFrame: Performance metrics for CV.
     """
     tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
     metrics_dict = {m.__name__: [] for m in metrics}
+    if h_split_point is not None:
+        metrics_dict1 = {m.__name__: [] for m in metrics}
+        metrics_dict2 = {m.__name__: [] for m in metrics}
     for idx, (train_index, test_index) in enumerate(tscv.split(df)):
         train, test = df.iloc[train_index], df.iloc[test_index]
         x_test = test.drop(columns=[model.target_col])
@@ -2303,64 +2389,114 @@ def hmm_cross_validate(model, df, cv_split,
             else:
                 eval_val = m(y_test, bb_forecast)
             metrics_dict[m.__name__].append(eval_val)
-    overall_performance = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
-    return pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
+        if h_split_point is not None and isinstance(h_split_point, int):
+            y_test_1, y_test_2 = y_test[:h_split_point], y_test[h_split_point:]
+            bb_forecast_1, bb_forecast_2 = bb_forecast[:h_split_point], bb_forecast[h_split_point:]
+            for m in metrics:
+                if m.__name__ in ['MASE', 'SMAE', 'SRMSE', 'RMSSE']:
+                    eval_val1 = m(y_test_1, bb_forecast_1, np.array(train[model.target_col]))
+                    eval_val2 = m(y_test_2, bb_forecast_2, np.array(train[model.target_col]))
+                else:
+                    eval_val1 = m(y_test_1, bb_forecast_1)
+                    eval_val2 = m(y_test_2, bb_forecast_2)
+                metrics_dict1[m.__name__].append(eval_val1)
+                metrics_dict2[m.__name__].append(eval_val2)
 
-def hmm_mv_cross_validate(model, df, cv_split,
-                          test_size, metrics,
-                          n_iter=1, step_size=None):
+    overall_performance = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
+    overall_performance = pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
+    if h_split_point is not None and isinstance(h_split_point, int):
+        performance_1 = [[m.__name__, np.mean(metrics_dict1[m.__name__])] for m in metrics]
+        performance_2 = [[m.__name__, np.mean(metrics_dict2[m.__name__])] for m in metrics]
+        overall_performance = pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
+        perf_1_df = pd.DataFrame(performance_1).rename(columns={0: "eval_metric", 1: f"score_before_{h_split_point}"})
+        perf_2_df = pd.DataFrame(performance_2).rename(columns={0: "eval_metric", 1: f"score_after_{h_split_point}"})
+        # merge all three dataframes
+        overall_performance = overall_performance.merge(perf_1_df, on="eval_metric").merge(perf_2_df, on="eval_metric")
+    return overall_performance
+
+def hmm_mv_cross_validate(
+    model,
+    df: pd.DataFrame,
+    target_col: str,
+    cv_split: int,
+    test_size: int,
+    metrics: List[Callable],
+    n_iter: int = 1,
+    step_size: int = 1,
+    h_split_point: Optional[int] = None,
+) -> pd.DataFrame:
     """
-    Cross-validate the bidirectional Vector Autoregressive Hidden Markov model.
-    Args:
-        df (pd.DataFrame): Input dataframe.
-        cv_split (int): Number of folds.
-        test_size (int): Forecast window for each split.
-        metrics (list): List of evaluation metric functions.
-        n_iter (int, optional): Number of iterations for HMM fitting.
-        step_size (int, optional): Step size for time series cross-validation.
-    Returns:
-        pd.DataFrame: CV performance metrics for each target variable.
+    Perform cross-validation for VAR model.
+
+    Parameters
+    ----------
+    model : object
+        VAR model instance with defined target_cols attribute, lag order, and etc.
+    df : pd.DataFrame
+        Input dataframe.
+    target_col : str
+        Target variable for evaluation.
+    cv_split : int
+        Number of cross-validation folds.
+    test_size : int
+        Test size per fold.
+    metrics : List[Callable]
+        List of metric functions.
+    step_size : int, optional
+        Step size for rolling window. Default is 1.
+    h_split_point : int, optional
+        Point to split the test set for separate evaluation. Default is None.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with averaged cross-validation metric scores.
     """
+
     tscv = ParametricTimeSeriesSplit(n_splits=cv_split, test_size=test_size, step_size=step_size)
     metrics_dict = {m.__name__: [] for m in metrics}
+    if h_split_point is not None:
+        metrics_dict1 = {m.__name__: [] for m in metrics}
+        metrics_dict2 = {m.__name__: [] for m in metrics}
 
-    for idx, (train_index, test_index) in enumerate(tscv.split(df)):
+    for train_index, test_index in tscv.split(df):
         train, test = df.iloc[train_index], df.iloc[test_index]
-        x_test = test.drop(columns=model.target_col)
-        # y_test1 = np.array(test[model.target_cols[0]])
-        # y_test2 = np.array(test[model.target_cols[1]])
-
-        # If it is first fold, fit the model
-        # model_ = model.copy()
-        # if (idx == 0) and (learn_per_fold in ["first", "all"]):
-        #     model.fit_em(train)
-        # # If learning per fold, learn the model on each fold
-        # elif (learn_per_fold == "all") and (idx != 0):
-        #     model.fit_em(train)
-        # # If not learning per fold, fit the model on the first fold
-        # else: # learn_per_fold == "None" or learn_per_fold == "first" for remaining folds
+        x_test, y_test = test.drop(columns=model.target_cols), np.array(test[target_col])
         model.fit(train, n_iter=n_iter)
 
-        forecasts = model.forecast(test_size, x_test) # dictionary of forecasts for all target columns
+        forecasts = model.forecast(test_size, x_test)[target_col]
+
         for m in metrics:
-            if m.__name__ in ['MASE', 'SMAE', 'SRMSE', 'RMSSE']:
-                val = [m(test[target_col], forecasts[target_col], train[target_col]) for target_col in model.target_col]
+            if m.__name__ in ["MASE", "SMAE", "SRMSE", "RMSSE"]:
+                eval_val = m(y_test, forecasts, train[target_col])
             else:
-                val = [m(test[target_col], forecasts[target_col]) for target_col in model.target_col]
-            # Append the list of metric value for each target column
-            metrics_dict[m.__name__].append(val)
+                eval_val = m(y_test, forecasts)
+            metrics_dict[m.__name__].append(eval_val)
+        if h_split_point is not None and isinstance(h_split_point, int):
+            y_test_1, y_test_2 = y_test[:h_split_point], y_test[h_split_point:]
+            bb_forecast_1, bb_forecast_2 = forecasts[:h_split_point], forecasts[h_split_point:]
+            for m in metrics:
+                if m.__name__ in ['MASE', 'SMAE', 'SRMSE', 'RMSSE']:
+                    eval_val1 = m(y_test_1, bb_forecast_1, np.array(train[model.target_col]))
+                    eval_val2 = m(y_test_2, bb_forecast_2, np.array(train[model.target_col]))
+                else:
+                    eval_val1 = m(y_test_1, bb_forecast_1)
+                    eval_val2 = m(y_test_2, bb_forecast_2)
+                metrics_dict1[m.__name__].append(eval_val1)
+                metrics_dict2[m.__name__].append(eval_val2)
 
-    # Compute average metric for each target_col
-    results = []
-    for m in metrics:
-        metric_name = m.__name__
-        vals = np.array(metrics_dict[metric_name])  # shape: (n_folds, n_targets)
-        avg_vals = np.mean(vals, axis=0)
-        results.append([metric_name] + list(avg_vals))
+    overall_performance = [[m.__name__, np.mean(metrics_dict[m.__name__])] for m in metrics]
+    overall_performance = pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
+    if h_split_point is not None and isinstance(h_split_point, int):
+        performance_1 = [[m.__name__, np.mean(metrics_dict1[m.__name__])] for m in metrics]
+        performance_2 = [[m.__name__, np.mean(metrics_dict2[m.__name__])] for m in metrics]
+        overall_performance = pd.DataFrame(overall_performance).rename(columns={0: "eval_metric", 1: "score"})
+        perf_1_df = pd.DataFrame(performance_1).rename(columns={0: "eval_metric", 1: f"score_before_{h_split_point}"})
+        perf_2_df = pd.DataFrame(performance_2).rename(columns={0: "eval_metric", 1: f"score_after_{h_split_point}"})
+        # merge all three dataframes
+        overall_performance = overall_performance.merge(perf_1_df, on="eval_metric").merge(perf_2_df, on="eval_metric")
+    return overall_performance
 
-    # Create dynamic column names
-    columns = ["eval_metric"] + [col for col in model.target_col]
-    return pd.DataFrame(results, columns=columns)
 
 #------------------------------------------------------------------------------
 # Parametric Time Series Split
