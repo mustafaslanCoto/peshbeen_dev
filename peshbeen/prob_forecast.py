@@ -1075,6 +1075,216 @@ class ets_prob_forecasts():
         self.y_forecast_c = y_forecast
         return self
     
+class naive_prob_forecasts():
+    """
+    Probabilistic forecasting for Naive forecasting model. It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
+    - n_calibration: number of calibration windows
+    - H: forecast horizon
+    - sliding_window: size of the sliding window for cross-validation
+    - season_period: seasonal period for naive forecasting
+    - verbose: whether to print progress messages
+    """
+    def __init__(self, n_calibration,
+                 H, sliding_window=1, season_period=None, verbose=False):
+        self.sliding_window = sliding_window
+        self.n_calib = n_calibration
+        self.verbose = verbose
+        self.H = H
+        self.season_period = season_period
+
+    def naive(self, series, H, season_period=None):
+        """Generate naive forecasts.
+
+        Parameters:
+        series (pd.Series): Time series data.
+        H (int): Forecast horizon.
+        season_period (int, optional): Seasonal period. If None, non-seasonal naive is used.
+        Returns:
+        np.ndarray: Forecasted values for the next H periods.
+        """
+        s = series.dropna()
+        if season_period is None:
+            # Non-seasonal naive: repeat last observed value H times
+            if len(s) == 0:
+                y_forecast = np.full(H, np.nan)
+            else:
+                last_val = s.iloc[-1]
+                y_forecast = np.full(H, last_val)
+        else:
+            # Seasonal naive: use values from one season back, repeated/cycled
+            if len(s) < season_period:
+                y_forecast = np.full(H, np.nan)
+            else:
+                last_season = s.iloc[-season_period:]
+                repeats = H // season_period
+                remainder = H % season_period
+                y_forecast = np.tile(last_season.values, repeats)
+                if remainder > 0:
+                    y_forecast = np.concatenate([y_forecast, last_season.values[:remainder]])
+        return y_forecast
+
+
+    def non_conformity_scores(self, series):
+        c_actuals, c_forecasts = [], []
+        # Create time series cross-validator that slides 1 time step for each training window
+        tscv = ParametricTimeSeriesSplit(n_splits=self.n_calib, test_size=self.H, step_size=self.sliding_window)
+
+        for train_index, test_index in tscv.split(series):
+            train, test = series[train_index], series[test_index]
+            y_test = np.array(test)
+            H_forecasts = np.array(self.naive(train, self.H, season_period=self.season_period))
+            c_forecasts.append(H_forecasts)
+            c_actuals.append(y_test)
+            if self.verbose:
+                print(f"Completed calibration window {len(c_forecasts)} out of {self.n_calib}")
+        self.resid = np.column_stack(c_actuals) - np.column_stack(c_forecasts) # Residuals n_calib*H
+        self.non_conform = np.abs(self.resid) # non-conformity scores
+        self.c_actuals = np.column_stack(c_actuals)
+        self.c_forecasts = np.column_stack(c_forecasts)
+
+    def calculate_quantile(self, scores_calib):
+        # Vectorized quantile calculation for list delta
+        if isinstance(self.delta, float):
+            which_quantile = np.ceil(self.delta * (self.n_calib + 1)) / self.n_calib
+            return np.quantile(scores_calib, which_quantile, method="lower", axis=0)
+        elif isinstance(self.delta, list):
+            which_quantiles = np.ceil(np.array(self.delta) * (self.n_calib + 1)) / self.n_calib
+            return np.array([np.quantile(scores_calib, q, method="lower", axis=0) for q in which_quantiles])
+        else:
+            raise ValueError("delta must be float or list of floats.")
+    
+    def calibrate(self, series, delta = 0.5):
+        """
+        Calibrate the conformal model using the calibration dataset.
+        Args:
+            series: pd.Series or np.array containing the calibration data.
+            delta (float or list): Significance level(s) for the prediction intervals.
+        """
+        self.delta = delta
+        self.non_conformity_scores(series)
+        h_quantiles = []
+        for i in range(self.H):
+            q_hat = self.calculate_quantile(self.non_conform[i])
+            h_quantiles.append(q_hat)
+        self.q_hat_D = np.array(h_quantiles)
+
+    # Generate prediction intervals using the calibrated quantiles
+
+    def generate_prediction_intervals(self, series):
+        '''
+        Generate conformal prediction intervals for the forecasted values.
+        Args:
+            series: pd.Series or np.array containing the training data.
+        '''
+        if not hasattr(self, 'q_hat_D'):
+            raise RuntimeError("Conformalizer must be calibrated before generating prediction intervals. Run .calibrate(df_calibration) first.")
+    
+        y_forecast = np.array(self.naive(series, self.H, season_period=self.season_period))
+        result = [y_forecast]
+        col_names = ["point_forecast"]
+
+        if isinstance(self.delta, float):
+            y_lower, y_upper = y_forecast - self.q_hat_D, y_forecast + self.q_hat_D
+            result.extend([y_lower, y_upper])
+            col_names.extend([f'lower_{int(self.delta*100)}', f'upper_{int(self.delta*100)}'])
+        elif isinstance(self.delta, list):
+            for idx, d in enumerate(self.delta):
+                y_lower = y_forecast - self.q_hat_D[:, idx]
+                y_upper = y_forecast + self.q_hat_D[:, idx]
+                result.extend([y_lower, y_upper])
+                col_names.extend([f'lower_{int(d*100)}', f'upper_{int(d*100)}'])
+        # distributions for each horizons. So add y_forecast array to each columns of self.resid and equal to self.dist
+        dist = y_forecast[:, None] + self.resid
+        self.dist = pd.DataFrame(dist.T, columns=[f'h_{i+1}' for i in range(self.H)])
+        self.dist = self.dist.clip(lower=0.1)
+        return pd.DataFrame(np.column_stack(result), columns=col_names)
+
+    def conformal_quantiles(self, series, quantiles):
+        """
+        Generate conformal quantiles for future time steps.
+        Args:
+            series: pd.Series or np.array containing the training data.
+            quantiles (float or list): Quantiles to be calculated (e.g., 0.1, 0.5, 0.9).
+            future_exog (pd.DataFrame, optional): Future exogenous variables for forecasting.
+        Returns:
+            pd.DataFrame: DataFrame containing point forecasts and conformal quantiles.
+        """
+        if not hasattr(self, 'q_hat_D'):
+            raise RuntimeError("Conformalizer must be calibrated before generating prediction intervals. Run .calibrate(df_calibration) first.")
+
+        y_forecast = np.array(self.naive(series, self.H, season_period=self.season_period))
+
+        return get_conformal_quantiles(self.non_conform, self.n_calib, quantiles, y_forecast)
+
+    def bootstrap(self, series, samples=1000, approximate="kde"):
+        """
+        Generate samples from the predictive distribution generated by residuals from conformal prediction.
+        The samples are drawn from a Gaussian kernel density estimate of the residuals.
+        """
+        # Return a random sample from Gaussian Kernel density estimation
+        if not hasattr(self, 'resid'):
+            raise RuntimeError("Residuals not available. Run .non_conformity_scores(df) .calibrate(df) or  first.")
+
+        y_forecast = np.array(self.naive(series, self.H, season_period=self.season_period))
+
+        # ✅ Create a deep copy so that we don’t overwrite self
+        new_instance = copy.deepcopy(self)
+        if approximate == "kde":
+            new_instance.bootstrap_forecasts = np.column_stack([[gaussian_kde(new_instance.resid[i]).resample(size=samples, seed=rng_kde)+y_forecast[i]]
+                                        for i in range(new_instance.H)])[0] # H x samples
+        elif approximate == "empirical":
+            new_instance.bootstrap_forecasts = np.column_stack([np.random.choice(new_instance.resid[i], size=samples, replace=True)+y_forecast[i]
+                for i in range(self.H)]).T
+        else:
+            raise ValueError("approximate must be 'kde' or 'empirical'.")
+
+        new_instance.bootstrap_forecasts_df = pd.DataFrame(new_instance.bootstrap_forecasts.T, columns=[f'h_{i+1}' for i in range(self.H)])
+        new_instance.y_forecast_b = y_forecast
+
+        return new_instance
+
+    def bootstrap_quantiles(self, quantiles, bootstrap_method='bootstrap'):
+        """
+        Generate bootstrap quantiles for future time steps.
+        Args:
+            quantiles (float or list): Quantiles to be calculated (e.g., 0.1, 0.5, 0.9).
+            bootstrap_method (str): The method to use for bootstrapping or simulated correlated_forecasts ('bootstrap' or 'correlated').
+        """
+        ## Make sure bootstrap() method is called before calling this method
+        if bootstrap_method == 'bootstrap':
+            if (not hasattr(self, 'bootstrap')):
+                raise RuntimeError("Bootstrap samples not available. Run .bootstrap(df) first.")
+            return get_bootstrap_quantiles(self.bootstrap_forecasts, self.n_calib, quantiles, self.y_forecast_b)
+        elif bootstrap_method == 'correlated':
+            if (not hasattr(self, 'simulate_correlated_forecasts')):
+                raise RuntimeError("Correlated forecast samples not available. Run .simulate_correlated_forecasts(df) first.")
+            return get_bootstrap_quantiles(self.w_samples.T, self.n_calib, quantiles, self.y_forecast_c)
+
+    def simulate_correlated_forecasts(self, series, samples=1000):
+        """
+        Simulate correlated errors to generate forecasts
+        Parameters:
+        - df: DataFrame containing the training data
+        - samples: number of samples to generate
+        - future_exog: optional exogenous variables for forecasting
+        Returns:
+        - DataFrame containing the simulated forecasts
+        """
+        if not hasattr(self, 'resid'):
+            raise RuntimeError("Residuals not available. Run .non_conformity_scores(df) .calibrate(df) or  first.")
+
+        y_forecast = np.array(self.naive(series, self.H, season_period=self.season_period))
+
+        mu = np.mean(self.resid.T, axis=0)
+        sigma_ = np.cov(self.resid.T, rowvar=False, ddof=1)
+
+        rng = np.random.default_rng(seed=42)
+        samples = rng.multivariate_normal(mu, sigma_, size=samples)
+        self.w_samples = samples + y_forecast
+        self.correlated_forecasts = pd.DataFrame(self.w_samples, columns=[f'h_{i+1}' for i in range(self.H)])
+        self.y_forecast_c = y_forecast
+        return self
+    
 class arima_prob_forecasts():
     """
     Probabilistic forecasting for ARIMA model. It generates prediction intervals for future time steps and approximates distribution of predictions using Kernel Density Estimation (KDE).
