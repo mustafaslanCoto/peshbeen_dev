@@ -224,7 +224,7 @@ def lr_trend_model(series, breakpoints=None, type='linear', degree=1):
         degree (int): The degree of the polynomial trend when type is "linear". Default is 1 (linear trend).
 
     Returns:
-        pd.Series: The piecewise trend of the time series, with length of each trend index to be used for forecasting and the fitted model
+        pd.Series: Fitted trend values, LinearRegression model, and design time index matrix.
     """ 
 
     T = np.arange(len(series), dtype=int)
@@ -251,7 +251,7 @@ def lr_trend_model(series, breakpoints=None, type='linear', degree=1):
             raise ValueError("Degree must be a positive integer.")
         model_lr = LinearRegression().fit(X_trend, np.array(series))
         trend = model_lr.predict(X_trend)
-    return trend, model_lr
+    return trend, model_lr, X_trend
 
 
 def forecast_trend(model, H, start, degree = 1, breakpoints=None):
@@ -281,10 +281,10 @@ def forecast_trend(model, H, start, degree = 1, breakpoints=None):
     X_future = T_future
     if breakpoints is not None:
         for bp in breakpoints:
-            hinge = np.maximum(0, T_future - bp).reshape(-1, 1)
+            hinge = np.maximum(0, T_future - bp).reshape(-1, 1) #
             X_future = np.hstack([X_future, hinge])
 
-    return model.predict(X_future)
+    return model.predict(X_future), X_future # Forecasted trend values and future design matrix
 
 
 def trend_strength(series, **kwargs):

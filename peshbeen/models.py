@@ -155,9 +155,9 @@ class ml_forecaster:
                 if self.trend in ["linear", "feature_lr"]:
                     # self.lr_model = LinearRegression().fit(np.arange(self.len).reshape(-1, 1), dfc[self.target_col])
                     if self.cps is not None:
-                        trend, self.lr_model = lr_trend_model(dfc[self.target_col], degree=self.pol, breakpoints=self.cps, type='piecewise')
+                        trend, self.lr_model, X_trend = lr_trend_model(dfc[self.target_col], degree=self.pol, breakpoints=self.cps, type='piecewise')
                     else:
-                        trend, self.lr_model = lr_trend_model(dfc[self.target_col], degree=self.pol)
+                        trend, self.lr_model, X_trend = lr_trend_model(dfc[self.target_col], degree=self.pol)
                     if self.trend == "linear":
                         dfc[self.target_col] = dfc[self.target_col] - trend
                 if self.trend in ["ets", "feature_ets"]:
@@ -192,7 +192,9 @@ class ml_forecaster:
                         dfc[f"{func.__class__.__name__}_{func.window_size}_shift_{func.shift}"] = func(dfc[self.target_col])
             if self.trend is not None:
                 if self.trend == "feature_lr":
-                    dfc["trend"] = trend
+                    # add X_trend matrix columns as features
+                    for i in range(X_trend.shape[1]):
+                        dfc[f"trend_{i}"] = X_trend[:, i]
                 if self.trend == "feature_ets":
                     dfc["trend"] = self.ets_model.fittedvalues.values
         return dfc.dropna()
@@ -306,7 +308,7 @@ class ml_forecaster:
             if self.trend in ["feature_lr", "linear"]:
                 # future_time = np.arange(self.len, self.len + H).reshape(-1, 1)
                 # trend_forecast = np.array(self.lr_model.predict(future_time)) # Predicting trend
-                trend_forecast= forecast_trend(model = self.lr_model, H=H, start=self.len, degree=self.pol, breakpoints=self.cps)
+                trend_forecast, X_trend_forecast = forecast_trend(model = self.lr_model, H=H, start=self.len, degree=self.pol, breakpoints=self.cps)
             else:  # ets or feature_ets
                 trend_forecast = np.array(self.ets_model_fit.forecast(H))
 
@@ -335,7 +337,7 @@ class ml_forecaster:
             trend_var = []
             if self.trend is not None:
                 if self.trend in ["feature_ets", "feature_lr"]:
-                    trend_var.append(trend_forecast[i]) # Add the trend forecast as a featured
+                    trend_var.extend(X_trend_forecast[i, :].tolist() if self.trend == "feature_lr" else [trend_forecast[i]])
 
             # Concatenate all features for the forecast step
             inp = x_var + inp_lag + transform_lag + trend_var
