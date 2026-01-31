@@ -11,6 +11,7 @@ rng_kde = np.random.default_rng(seed=42)
 # --------------------------------------------------------------------- 
 # Helper functions and classes for probabilistic forecasting with conformal prediction
 # ---------------------------------------------------------------------
+# Generate conformal quantiles for future time steps
 
 def get_conformal_quantiles(non_conform, n_calib, quantiles, y_forecast):
     """
