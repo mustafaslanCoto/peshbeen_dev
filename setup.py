@@ -18,7 +18,7 @@ setup(
         "numpy>=2.0",
         "pandas>=2.2",
         "scikit-learn>=1.5",
-        "scipy>=1.15",
+        "scipy>=1.15,<1.16",
         "statsmodels>=0.14",
         "matplotlib>=3.9",
         "seaborn>=0.13",
